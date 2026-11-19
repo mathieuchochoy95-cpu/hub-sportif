@@ -200,6 +200,10 @@ table.ex td{border-bottom:1px solid var(--line);padding:8px 6px;vertical-align:t
 .dots i.cur{border-color:var(--accent)}
 .restbar{height:12px;border-radius:999px;background:var(--surface-2);border:1px solid var(--line);overflow:hidden}
 .restbar>i{display:block;height:100%;background:var(--accent);transition:width .25s linear}
+.bandchips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.chip{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:6px 12px;font-weight:600;cursor:pointer;font-variant-numeric:tabular-nums}
+.chip.on{background:var(--sw);border-color:var(--sw);color:#fff}
+#live .chip{padding:10px 14px;font-size:1rem}
 #toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;font-weight:600;display:none;z-index:30;max-width:90vw}
 #toast.show{display:block}
 
@@ -336,6 +340,8 @@ function currentMetrics(p,logs){
     jump:num(p.vDetente),weight:num(p.poids),runRef:null};
   const rs=parseTime(p.refTemps),rd=num(p.refDist);
   if(rs&&rd)c.runRef={dist:rd,sec:rs*(REF_AGE[p.refAge]||1)};
+  if(parseTime(p.ref10))c.runRef={dist:10,sec:parseTime(p.ref10)*(REF_AGE[p.refAge]||1)};
+  if(parseTime(p.ref5))c.runRef={dist:5,sec:parseTime(p.ref5)*(REF_AGE[p.refAge]||1)};
   const since=p.savedAt?p.savedAt.slice(0,10):'0000';
   const sorted=(logs||[]).filter(l=>l.date>=since&&l.statut!=='annulee').sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0);
   for(const l of sorted){
@@ -581,6 +587,12 @@ function analyze(p,cur,logs){
     const longMin=raceGoal.def.long*A.efPace/60;
     if(longMin>(num(p.dureeWE)||num(p.dureeMax)||60)+5)A.warnings.push({lvl:'warn',txt:`Ta plus longue sortie montera vers ${raceGoal.def.long} km, soit environ ${Math.round(longMin)} min. C’est plus que ta durée maximale le week-end : garde un créneau plus long ce jour-là.`});
   }
+  if(templateMode(p)){
+    A.warnings=A.warnings.filter(w=>!/emploi du temps|Même au minimum|Aucun jour disponible/.test(w.txt));
+    const skills=A.goals.filter(g=>['frontlever','planche','handstand','lsit','muscleup'].includes(g.type)&&g.feas.verdict!=='past');
+    if(skills.length)A.warnings.push({lvl:'warn',txt:`Ta semaine type ne contient pas de travail spécifique pour : ${skills.map(g=>g.def.label.replace('…','').toLowerCase()).join(', ')}. Ces objectifs progresseront peu. Dis-le-moi si tu veux un bloc dédié dans la séance poids du corps.`});
+    if(A.goals.some(g=>g.type==='jump'&&g.feas.verdict!=='past'))A.warnings.push({lvl:'warn',txt:'Ta semaine type n’a pas de séance de sauts : seuls le Front Squat et le Soulevé de Terre Roumain travaillent ta détente. L’objectif de détente sera plus lent que l’estimation.'});
+  }
   return A;
 }
 
@@ -603,6 +615,219 @@ function phaseFor(goals,i,start){
 }
 const PCT={Fondation:[.55,.6,.65],Développement:[.6,.65,.7],Spécifique:[.7,.75,.8],Affûtage:[.6,.6,.6],Entretien:[.55,.6,.6],Récupération:[.5,.5,.5]};
 
+
+/* ==========================================================================
+   SEMAINE TYPE & PROGRESSION CONDITIONNELLE
+   Le volume de course, les allures, les charges et les répétitions n'augmentent
+   que si la séance ou la semaine précédente a été réussie.
+   ========================================================================== */
+const SW_PACK=[5,10,15,20,20,25,25];
+const TPL_TYPES=[['push','Push SmartWorkout'],['pull','Pull + jambes SmartWorkout'],['pdc','Poids du corps'],['ef','Footing facile'],['long','Sortie longue'],['frac','Fractionné'],['volley','Volley']];
+const TPL_KM={ef:6,long:10,frac:8};
+const DEFAULT_WEEK={days:[[{t:'push'},{t:'ef',km:6}],[{t:'ef',km:6},{t:'volley'}],[{t:'pull'}],[{t:'long',km:10}],[],[{t:'pdc'}],[{t:'frac',km:8}]],volMax:40};
+function weekTemplate(p){const s=p&&p.semaine;return s&&Array.isArray(s.days)&&s.days.length===7?s:DEFAULT_WEEK;}
+function templateMode(p){return !!p&&p.mode!=='auto';}
+function bandsFor(kg){let best=null;for(let m=1;m<(1<<SW_PACK.length);m++){let s=0,c=0;const idx=[];for(let i=0;i<SW_PACK.length;i++)if(m&(1<<i)){s+=SW_PACK[i];c++;idx.push(i);}const d=Math.abs(s-kg);if(!best||d<best.d||(d===best.d&&c<best.c))best={d,c,idx,s};}return best;}
+const bandsSum=idx=>(idx||[]).reduce((a,i)=>a+SW_PACK[i],0);
+function bandsLabel(idx){const v=(idx||[]).map(i=>SW_PACK[i]).sort((a,b)=>a-b);return v.length?v.join(' + ')+(v.length>1?' = '+bandsSum(idx)+' kg':' kg'):'aucun';}
+
+/* --- Exercices des séances SmartWorkout (noms exacts de l'app) --- */
+const TPL_PUSH=[
+  {nom:'Développé Debout (2 Ancrages)',app:'Pectoraux',kind:'Gros exercice',series:4,lo:6,hi:10,start:35,cap:100,alt:['Développé Debout (Poulie Moyenne)','Pompes Lestées avec Bandes'],repos:'2 min 30',note:'Exercice principal, le plus lourd de la séance.'},
+  {nom:'Développé Militaire Debout',app:'Épaules',kind:'Gros exercice',series:3,lo:8,hi:12,start:20,alt:['Overhead Press','Développé Arnold'],repos:'2 min',note:'Gainage serré, pas de cambrure.'},
+  {nom:'Développé Incliné',app:'Pectoraux',kind:'Gros exercice',series:3,lo:8,hi:12,start:25,cap:100,alt:['Développé Joint (Poulie Basse)'],repos:'2 min'},
+  {nom:'Élévations Latérales',app:'Épaules',kind:'Isolation',series:3,lo:12,hi:15,start:5,alt:['Élévation Latérale Unilatérale'],repos:'1 min'},
+  {nom:'Extension Triceps Verticale',app:'Bras',kind:'Isolation',series:3,lo:12,hi:15,start:10,alt:['Extension Triceps (Poulie Haute)','Kickback Triceps (Poulie Basse)'],repos:'1 min'}];
+const TPL_PULL=[
+  {nom:'Rowing Buste Penché (Prise Large)',app:'Dos',kind:'Gros exercice',series:4,lo:6,hi:10,start:35,alt:['Rowing Buste Penché (Prise Supination)','Tirage Buste Penché'],repos:'2 min 30',note:'Exercice principal, le plus lourd de la séance.'},
+  {nom:'Tirage Vertical (Poulie Haute)',app:'Dos',kind:'Gros exercice',series:3,lo:8,hi:12,start:25,cap:100,alt:['Tirage Vertical (Supination)','Tirage Vertical (Prise Serrée)'],repos:'2 min'},
+  {nom:'Tirage Poulie Basse',app:'Dos',kind:'Gros exercice',series:3,lo:8,hi:12,start:30,cap:100,alt:['Tirage Horizontal (Bandes de Résistance)','Tirage Poulie Basse (Supination)'],repos:'2 min'},
+  {nom:'Front Squat',app:'Jambes',kind:'Jambes',series:3,lo:8,hi:12,start:45,alt:['Squat (bande de résistance)'],repos:'2 min',note:'Garde 2 répétitions en réserve : sortie longue demain.'},
+  {nom:'Soulevé de Terre Roumain',app:'Jambes',kind:'Jambes',series:3,lo:8,hi:12,start:40,alt:['Good Morning','Soulevé de Terre avec Bandes'],repos:'2 min',note:'Dos plat, hanches vers l’arrière.'},
+  {nom:'Face Pull (Poulie Haute)',app:'Épaules',kind:'Isolation',series:3,lo:12,hi:15,start:10,cap:100,alt:['Reverse Fly (Poulie Moyenne)','Oiseau Debout Face'],repos:'1 min',note:'Prévention de l’épaule pour l’attaque au volley.'},
+  {nom:'Curl Marteau',app:'Bras',kind:'Isolation',series:3,lo:10,hi:15,start:15,alt:['Curl Biceps','Curl Marteau Unilatéral'],repos:'1 min'}];
+
+/* --- Séance poids du corps : 3 mouvements de base + 1 exercice pour améliorer chacun --- */
+function tplPdcList(p){
+  const pu=num(p.tractions)||0,dp=num(p.dips)||0,po=num(p.pompes)||0,L=[];
+  L.push(pu>=3?{nom:'Tractions strictes',series:4,init:Math.max(2,Math.round(pu*0.6)),repos:'2 min 30',kind:'Mouvement de base',note:'Amplitude complète : bras tendus en bas, menton au-dessus de la barre.'}
+              :{nom:'Tractions négatives (descente en 5 s)',series:4,init:3,repos:'2 min',kind:'Mouvement de base',note:'Monte en sautant, descends le plus lentement possible.'});
+  L.push(dp>=3?{nom:'Dips stricts',series:4,init:Math.max(2,Math.round(dp*0.6)),repos:'2 min',kind:'Mouvement de base',note:'Descends jusqu’à 90° aux coudes.'}
+              :{nom:'Dips négatifs (descente en 4 s)',series:4,init:3,repos:'2 min',kind:'Mouvement de base'});
+  L.push(po>=5?{nom:'Pompes strictes',series:3,init:Math.max(3,Math.round(po*0.6)),repos:'1 min 30',kind:'Mouvement de base',note:'Corps gainé, poitrine près du sol.'}
+              :{nom:'Pompes à genoux',series:3,init:8,repos:'1 min 30',kind:'Mouvement de base'});
+  L.push(pu<3?{nom:'Tractions australiennes (rangées sous barre basse)',series:3,init:8,repos:'90 s',kind:'Pour tes tractions',note:'Renforce le dos et les biceps en vue de ta première traction.'}
+        :pu<12?{nom:'Tractions négatives lentes (descente en 5 s)',series:3,init:4,repos:'2 min',kind:'Pour tes tractions',note:'La phase de descente renforce le mouvement plus vite que les tractions seules.'}
+        :{nom:'Tractions explosives poitrine à la barre',series:4,init:3,repos:'2 min',kind:'Pour tes tractions',note:'Tire le plus vite possible : prépare aussi le muscle-up.'});
+  L.push(dp<3?{nom:'Dips sur banc',series:3,init:8,repos:'90 s',kind:'Pour tes dips'}
+        :dp<12?{nom:'Dips négatifs (descente en 4 s)',series:3,init:4,repos:'2 min',kind:'Pour tes dips'}
+        :{nom:'Dips tempo (3 s en descente, 1 s de pause en bas)',series:3,init:6,repos:'2 min',kind:'Pour tes dips',note:'Le ralentissement renforce la position basse, la plus difficile.'});
+  L.push(po<20?{nom:'Pompes négatives (descente en 4 s)',series:3,init:5,repos:'90 s',kind:'Pour tes pompes'}
+        :po<40?{nom:'Pompes déclinées (pieds surélevés)',series:3,init:Math.max(5,Math.round(po*0.4)),repos:'90 s',kind:'Pour tes pompes',note:'Plus de charge sur le haut des pectoraux et les épaules.'}
+        :{nom:'Pompes archer',series:3,init:5,repos:'90 s',kind:'Pour tes pompes',note:'Par côté. Prépare les pompes sur un bras.'});
+  return L;
+}
+
+/* --- Progression des exercices à élastiques : fourchette de répétitions + résistance --- */
+function swState(ex,logs,before){
+  let res=ex.start,fails=0,why=`Point de départ indicatif (${ex.start} kg) : ajuste pour finir chaque série avec 2 répétitions en réserve.`;
+  const L=logs.filter(l=>l.statut!=='annulee'&&l.date<before&&(l.sets||[]).some(s=>s.nom===ex.nom)).sort((a,b)=>a.date<b.date?-1:1);
+  for(const l of L){
+    const s=l.sets.find(x=>x.nom===ex.nom);const vals=s.vals.filter(v=>v!=null);const used=s.res!=null?+s.res:res;const full=vals.length>0&&vals.length===s.vals.length;const dt=fmtDate(parseDate(l.date));
+    if(full&&vals.every(v=>v>=ex.hi)){res=Math.min(ex.cap||120,used+5);fails=0;why=`+5 kg : toutes tes séries ont atteint ${ex.hi} répétitions le ${dt} (avec ${used} kg). Repars à ${ex.lo} répétitions.`;}
+    else if(full&&vals.every(v=>v>=ex.lo)){res=used;fails=0;why=`Même résistance (${used} kg) : vise ${ex.hi} répétitions sur toutes les séries avant de monter (dernière séance le ${dt}).`;}
+    else{fails++;if(fails>=2){res=Math.max(5,used-5);fails=0;why=`−5 kg : deux séances de suite sous ${ex.lo} répétitions (dernière le ${dt}).`;}else{res=used;why=`Même résistance (${used} kg) : la séance du ${dt} n’a pas atteint ${ex.lo} répétitions sur toutes les séries. On ne monte pas tant que ce n’est pas réussi.`;}}
+  }
+  return {res,why:why.replace(/\.\./g,'.')};
+}
+/* --- Progression poids du corps : objectif de répétitions par série --- */
+function bwState(ex,logs,before){
+  let r=ex.init,fails=0,why=`Point de départ : environ 60 % de ton maximum.`;
+  const L=logs.filter(l=>l.statut!=='annulee'&&l.date<before&&(l.sets||[]).some(s=>s.nom===ex.nom)).sort((a,b)=>a.date<b.date?-1:1);
+  for(const l of L){
+    const s=l.sets.find(x=>x.nom===ex.nom);const vals=s.vals.filter(v=>v!=null);const used=s.cible!=null?+s.cible:r;const full=vals.length>0&&vals.length===s.vals.length;const dt=fmtDate(parseDate(l.date));
+    if(full&&vals.every(v=>v>=used)){r=used+1;fails=0;why=`+1 répétition : toutes les séries réussies à ${used} le ${dt}.`;}
+    else{fails++;if(fails>=2){r=Math.max(1,used-1);fails=0;why=`−1 répétition : deux séances de suite incomplètes (dernière le ${dt}).`;}else{r=used;why=`Même objectif (${used}) : toutes les séries n’ont pas été réussies le ${dt}. On ne monte pas tant que ce n’est pas fait.`;}}
+  }
+  return {r,why:why.replace(/\.\./g,'.')};
+}
+
+/* --- Forme en course : allure 5 km recalculée à partir de tes séances --- */
+function initialP5(p){
+  const age=REF_AGE[p.refAge]||1,est=[],src=[];
+  const t5=parseTime(p.ref5),t10=parseTime(p.ref10);
+  if(t5){est.push(t5*age/5);src.push('ton chrono sur 5 km ('+fmtTime(t5)+')');}
+  if(t10){est.push(riegel(t10*age,10,5)/5);src.push('ton chrono sur 10 km ('+fmtTime(t10)+')');}
+  if(!est.length&&num(p.refDist)&&parseTime(p.refTemps)){est.push(riegel(parseTime(p.refTemps)*age,num(p.refDist),5)/5);src.push('ton chrono de référence');}
+  if(est.length)return {p5:est.reduce((a,b)=>a+b,0)/est.length,src:src.join(' et ')};
+  const base=parseTime(p.allureBase);if(base)return {p5:base/1.22,src:'ton allure habituelle en footing ('+fmtTime(base)+' /km)'};
+  return {p5:420,src:'une valeur par défaut (renseigne un chrono dans le questionnaire)'};
+}
+function runFitness(p,logs,before){
+  const ini=initialP5(p);const fk=num((weekTemplate(p).days.flat().find(x=>x.t==='frac')||{}).km)||8;let p5=ini.p5,why=`Calculées à partir de ${ini.src}.`,repsN=clamp(Math.round((fk-3.3)/1.2),3,8),repDist=0.8,miss=0;
+  const L=logs.filter(l=>l.sport==='course'&&l.statut!=='annulee'&&l.date<before).sort((a,b)=>a.date<b.date?-1:1);
+  for(const l of L){
+    const t=l.tests&&l.tests.run,dt=fmtDate(parseDate(l.date));
+    if(t&&t.sec&&t.dist){p5=(t.dist===5?t.sec:riegel(t.sec,t.dist,5))/5;why=`Recalculées avec ton chrono de ${fr(t.dist)} km du ${dt} (${fmtTime(t.sec)}).`;continue;}
+    const pl=l.plan||{};if(pl.kind!=='run-frac'||!pl.repsN)continue;
+    const reps=((l.run&&l.run.reps)||[]).filter(x=>x>0),d=pl.repDist||0.8,before5=p5;
+    if(reps.length>=pl.repsN){
+      const a=reps.reduce((s,x)=>s+x,0)/reps.length/d,rpe=num(l.rpe);
+      if(a<=p5*0.98&&(rpe==null||rpe<=8)){const np=Math.max(p5*0.98,a);why=`Accélérées : ton fractionné du ${dt} était plus rapide que prévu (moyenne ${fmtPace(a)}).`;p5=np;}
+      else if(a<=p5*1.01){if(rpe!=null&&rpe<=7){p5*=0.99;why=`Accélérées de 1 % : fractionné du ${dt} tenu avec de la marge (effort ${rpe}/10).`;}else why=`Inchangées : fractionné du ${dt} tenu à l’allure prévue.`;}
+      else if(a>p5*1.03){p5=Math.min(p5*1.03,a);why=`Ralenties : ton fractionné du ${dt} était plus lent que prévu (moyenne ${fmtPace(a)}).`;}
+      else why=`Inchangées : fractionné du ${dt} juste un peu plus lent que prévu.`;
+      if(a<=before5*1.02){repsN++;if(repDist<1&&repsN>8){repDist=1;repsN=5;}else if(repDist>=1&&repsN>7)repsN=7;}
+      miss=0;
+    }else{
+      miss++;why=`Inchangées : ${reps.length} répétition${reps.length>1?'s':''} sur ${pl.repsN} le ${dt}.`;
+      if(miss>=2){p5*=1.02;repsN=Math.max(4,repsN-1);miss=0;why=`Ralenties de 2 % et une répétition en moins : deux fractionnés incomplets de suite.`;}
+    }
+  }
+  return {p5,why:why.replace(/\.\./g,'.'),repsN,repDist};
+}
+function easyRange(p5){return fmtTime(p5*1.18)+'–'+fmtTime(p5*1.26)+' /km';}
+function hrTxt(p,lo,hi){const m=num(p.fcMax);return m?` (FC ${Math.round(m*lo)}–${Math.round(m*hi)})`:'';}
+
+function tplMuscu(type,date,p,logs,deload){
+  const list=type==='push'?TPL_PUSH:TPL_PULL;const blocks=[txt('Échauffement (8 min)','Mobilité des épaules, 2 séries légères du premier exercice avec l’élastique de 10 kg.')];
+  if(deload)blocks.push(txt('Semaine allégée','Une série en moins par exercice, même résistance. Aucune série à l’échec.'));
+  if(!hasSW(p))blocks.push(txt('Matériel','Coche « Pack SmartWorkout Élite » dans le questionnaire (étape 2) : cette séance est construite pour lui.'));
+  let min=8;
+  for(const ex of list){
+    const st=swState(ex,logs,date),combo=bandsFor(st.res),series=deload?Math.max(2,ex.series-1):ex.series;
+    min+=series*(0.75+parseRest(ex.repos)/60);
+    blocks.push(exo(ex.nom,series,ex.lo,'reps',{prog:true,res:true,lo:ex.lo,hi:ex.hi,range:`${ex.lo}–${ex.hi}`,resKg:st.res,bandsIdx:combo.idx,charge:`Élastiques : ${bandsLabel(combo.idx)}`,why:st.why,app:ex.app,alt:ex.alt,repos:ex.repos,note:ex.note,cat:ex.kind}));
+  }
+  return mkSession({sport:'sw',kind:'sw-'+type,title:type==='push'?'Push SmartWorkout':'Pull SmartWorkout + jambes',dureeMin:Math.round(min),intensite:deload?'Modérée':'Difficile',hard:type==='pull'?'legs':'upper',log:'sw',prog:true,blocks});
+}
+function tplPdc(date,p,logs,deload){
+  if(deload)return mkSession({sport:'sw',kind:'sw-test',title:'Tests de force',dureeMin:45,intensite:'Test',hard:'upper',log:'test',tests:['pullups','dips','pushups'],prog:true,
+    blocks:[txt('Protocole','Échauffement complet de 10 min. Un seul essai maximal par test, 4 à 5 min de repos entre deux tests, mouvements stricts. Tes résultats alimentent ta courbe de progression.'),txt(TEST_LABEL.pullups,''),txt(TEST_LABEL.dips,''),txt(TEST_LABEL.pushups,'')]});
+  const blocks=[txt('Échauffement (10 min)','Mobilité épaules et poignets, 2 × 10 scapula pulls, 1 série facile de chaque mouvement.')];let min=10;
+  for(const ex of tplPdcList(p)){const st=bwState(ex,logs,date);min+=ex.series*(0.6+parseRest(ex.repos)/60);
+    blocks.push(exo(ex.nom,ex.series,st.r,'reps',{prog:true,bw:true,why:st.why,repos:ex.repos,note:ex.note,cat:ex.kind,lest:has(p,'lest')&&/Tractions strictes|Dips stricts/.test(ex.nom)&&st.r>15}));}
+  return mkSession({sport:'sw',kind:'sw-pdc',title:'Poids du corps : tractions, dips, pompes',dureeMin:Math.round(min),intensite:'Difficile',hard:'upper',log:'sw',prog:true,blocks});
+}
+function tplRun(t,km,fit,p,deload){
+  const p5=fit.p5,easy=easyRange(p5),kmMin=k=>Math.round(k*p5*1.22/60);
+  if(t==='frac'){
+    if(deload){const km2=8.3;return mkSession({sport:'course',kind:'run-test',title:'Test chrono 5 km',dureeMin:kmMin(3.3)+Math.round(p5*5/60),intensite:'Test',hard:'legs',log:'run',testDist:5,plannedKm:km2,prog:true,
+      blocks:[txt('Échauffement',`15 min à ${easy} puis 3 accélérations progressives.`),txt('Test','5 km à fond sur parcours plat et mesuré. Pars à ton allure actuelle ('+fmtPace(p5)+') et accélère sur le dernier kilomètre.'),txt('Retour au calme','10 min très facile. Saisis ton chrono exact : il recalcule toutes tes allures.')]});}
+    const n=fit.repsN,d=fit.repDist,repLo=fmtTime(p5*0.99*d),repHi=fmtTime(p5*1.0*d),k=Math.round((2+n*(d+0.4)+1.3)*10)/10;
+    return mkSession({sport:'course',kind:'run-frac',title:'Fractionné',dureeMin:kmMin(3.3)+Math.round(n*(p5*d+150)/60),intensite:'Difficile',hard:'legs',log:'run',plannedKm:k,repsN:n,repDist:d,prog:true,
+      blocks:[txt('Échauffement',`15 min à ${easy}${hrTxt(p,0.65,0.77)}, puis 3 ou 4 accélérations progressives de 20 s.`),
+        txt('Fractionné',`${n} × ${d*1000} m, chaque répétition en ${repLo} à ${repHi} (allure ${fmtPace(p5)}${hrTxt(p,0.92,0.98)}). Entre deux : ${d<1?'400 m':'400 m'} de trot très lent, ou de la marche au début.`),
+        txt('Retour au calme',`10 min à allure facile.`),txt('Important','Saisis le temps de chaque répétition : c’est ce qui recalcule tes allures et le nombre de répétitions de la semaine suivante. Le dernier doit être aussi rapide que le premier.')]});
+  }
+  const long=t==='long';
+  return mkSession({sport:'course',kind:long?'run-long':'run-ef',title:long?'Sortie longue':'Footing facile',dureeMin:kmMin(km),intensite:'Facile',hard:long?'legs':'none',log:'run',plannedKm:km,long,prog:true,
+    blocks:[txt('Corps de séance',`${fr(km)} km (≈ ${kmMin(km)} min) à ${easy}${hrTxt(p,0.65,0.77)}. Tu dois pouvoir parler en courant. Si ça te semble trop lent, c’est voulu : 80 % de tes kilomètres se courent à cette allure.`),
+      ...(long?[txt('Conseil','Pars encore plus lentement les 15 premières minutes. Emporte de l’eau au-delà d’une heure.')]:[])]});
+}
+function tplVolley(p){return mkSession({sport:'volley',kind:'v-club',title:'Volley (club)',dureeMin:num(p.vDuree)||120,intensite:'Modérée',hard:'legsMod',log:'volley',fixedSlot:true,blocks:[txt('Avant l’entraînement','5 min d’activation des épaules à l’élastique et 5 sauts progressifs.'),txt('Après','Étirements doux des épaules et des mollets. Note ton effort ressenti.')]});}
+
+function buildTemplateWeeks(p,logs,A,start,nW){
+  const tpl=weekTemplate(p),ts=toStr(today());
+  const runDefs=[];tpl.days.forEach((list,d)=>list.forEach(s=>{if(TPL_KM[s.t]!=null)runDefs.push({d,t:s.t,km:num(s.km)||TPL_KM[s.t]});}));
+  const baseSum=runDefs.reduce((a,r)=>a+r.km,0)||0;
+  const Vmax=Math.max(baseSum,num(tpl.volMax)||40),Vmin=Math.round(baseSum*0.6);
+  const cur=num(p.kmSemaine);
+  let V=baseSum;if(cur!=null&&cur>0&&cur<baseSum*0.8)V=Math.round(Math.max(baseSum*0.7,cur*1.1));
+  let reason=`Semaine 1 : ${V} km${V<baseSum?` (tu cours ${cur} km par semaine en ce moment : on démarre un peu en dessous de ta semaine type)`:''}.`;
+  const raceGoals=A.goals.filter(g=>g.def.sport==='course'&&(g.def.kind==='time'||g.def.kind==='finish')&&g.dateObj&&g.feas.verdict!=='past');
+  const weeks=[];
+  for(let i=1;i<=nW;i++){
+    const ws=addDays(start,(i-1)*7),we=addDays(ws,6),wsS=toStr(ws),weS=toStr(we),past=weS<ts;
+    const deload=i%4===0;
+    const race=raceGoals.find(g=>g.dateObj>=ws&&g.dateObj<=we);
+    const Vi=Math.round(V*(deload?0.8:1)*(race?0.7:1));
+    const fit=runFitness(p,logs,wsS<=ts?wsS:ts);
+    const sessions=[];
+    // course : fractionné d'abord (son volume dépend des répétitions), puis répartition du reste
+    const fracDef=runDefs.find(r=>r.t==='frac');
+    let fracKm=0;
+    const runMade={};
+    if(fracDef){const s=tplRun('frac',0,fit,p,deload);fracKm=s.plannedKm;runMade[runDefs.indexOf(fracDef)]=s;}
+    const others=runDefs.filter(r=>r.t!=='frac'),oSum=others.reduce((a,r)=>a+r.km,0)||1,rest=Math.max(0,Vi-fracKm);
+    for(const r of others){let km=Math.max(3,Math.round(rest*r.km/oSum*2)/2);if(r.t==='long')km=Math.min(km,21);runMade[runDefs.indexOf(r)]=tplRun(r.t,km,fit,p,deload);}
+    tpl.days.forEach((list,d)=>{const date=toStr(addDays(ws,d));list.forEach((s,j)=>{
+      let ss=null;
+      if(TPL_KM[s.t]!=null){const k=runDefs.findIndex(r=>r.d===d&&r.t===s.t&&!r.used);runDefs[k].used=true;ss=runMade[k];}
+      else if(s.t==='push'||s.t==='pull')ss=tplMuscu(s.t,date,p,logs,deload);
+      else if(s.t==='pdc')ss=tplPdc(date,p,logs,deload);
+      else if(s.t==='volley')ss=tplVolley(p);
+      if(!ss)return;
+      if(race&&toStr(race.dateObj)===date&&ss.sport==='course')return;
+      ss.day=d;ss.date=date;ss.id=date+'_'+ss.kind+(j?'-'+j:'');sessions.push(ss);
+    });});
+    runDefs.forEach(r=>delete r.used);
+    if(race){const di=daysBetween(ws,race.dateObj);sessions.push(Object.assign(mkSession({sport:'course',kind:'race-'+race.type,title:'Jour J : '+(race.def.kind==='time'?race.def.label.replace('…',' '+goalTargetLabel(race)):'course de '+fr(race.def.dist)+' km'),dureeMin:Math.round(race.def.dist*fit.p5/60)+30,intensite:'Compétition',hard:'legs',log:'run',testDist:race.def.dist,plannedKm:race.def.dist,goal:true,
+      blocks:[txt('Stratégie','Pars à ton allure cible, pas plus vite, et accélère dans le dernier quart.')]}),{day:di,date:toStr(race.dateObj),id:toStr(race.dateObj)+'_race'}));}
+    sessions.sort((a,b)=>a.day-b.day);
+    const plannedKm=sessions.reduce((a,s)=>a+(s.sport==='course'?(s.plannedKm||0):0),0);
+    const w={index:i,start:ws,deload,anyTaper:!!race,vol:Math.round(plannedKm),sessions,unplaced:[],pr:{phase:'Semaine type',k:0},ps:{phase:'Semaine type',k:0},pv:{phase:'Semaine type',k:0},
+      label:deload?'Semaine allégée + tests':race?'Semaine de course':past?'Semaine passée':wsS<=ts?'Semaine en cours':'Prévision',
+      note:deload?`Semaine allégée : ${Vi} km, soit 80 % de ton volume de base (${V} km). Le volume de base ne bouge pas cette semaine.`:race?`Semaine de course : ${Vi} km, volume réduit de 30 % pour arriver frais.`:reason,paceNote:`5 km à ${fmtPace(fit.p5)}, footing facile ${easyRange(fit.p5)}. ${fit.why}`};
+    weeks.push(w);
+    // Décision pour la semaine suivante
+    if(past){
+      const wl=logs.filter(l=>l.date>=wsS&&l.date<=weS&&l.statut!=='annulee');
+      const done=Math.round(wl.reduce((a,l)=>a+(l.sport==='course'&&l.run?(num(l.run.distance)||0):0),0)*10)/10;
+      const fs=sessions.find(s=>s.kind==='run-frac'),fl=fs&&logs.find(l=>l.plannedId===fs.id);
+      const fracOk=!fs||(fl&&fl.statut==='realisee'&&((fl.run&&fl.run.fractions==='complet')||(((fl.run&&fl.run.reps)||[]).filter(x=>x>0).length>=fs.repsN)));
+      const plannedRun=sessions.reduce((a,s)=>a+(s.sport==='course'?(s.plannedKm||0):0),0);
+      const pain=wl.some(l=>num(l.douleur)>=4),ratio=plannedRun?done/plannedRun:1;
+      if(deload||race)reason=`Semaine ${i+1} : retour à ${V} km après la semaine allégée.`;
+      else if(pain||ratio<0.6){const nv=Math.max(Vmin,Math.round(V*0.9));reason=`Semaine ${i+1} : ${nv} km (−10 %). Semaine ${i} : ${pain?'douleur signalée':fr(done)+' km courus sur '+fr(plannedRun)+' prévus'}. On allège pour repartir sur de bonnes bases.`;V=nv;}
+      else if(ratio>=0.9&&fracOk){const nv=Math.min(Vmax,Math.round(V*1.1));reason=nv>V?`Semaine ${i+1} : ${nv} km (+10 %). Semaine ${i} réussie : ${fr(done)} km sur ${fr(plannedRun)} prévus, fractionné complet.`:`Semaine ${i+1} : ${nv} km. Tu as atteint ton volume visé (${Vmax} km) : on le stabilise.`;V=nv;}
+      else reason=`Semaine ${i+1} : ${V} km, comme la semaine ${i}. ${fr(done)} km courus sur ${fr(plannedRun)} prévus${fracOk?'':', fractionné incomplet'} : on ne monte pas tant que ce n’est pas réussi.`;
+    }else if(!deload&&!race){const nv=Math.min(Vmax,Math.round(V*1.1));reason=`Semaine ${i+1} : prévision à ${nv} km si la semaine ${i} est réussie (au moins 90 % des kilomètres et le fractionné complet). Sinon, le volume reste identique.`;V=nv;}
+    else reason=`Semaine ${i+1} : prévision à ${V} km après la semaine allégée.`;
+  }
+  return weeks;
+}
+
 function buildProgram(p,logs){
   const cur=currentMetrics(p,logs);
   const A=analyze(p,cur,logs);
@@ -613,6 +838,7 @@ function buildProgram(p,logs){
   if(!goals.length)nW=8;
   const ctx={p,cur,A,start};
   const runAll=A.runGoals, swAll=A.swGoals, vAll=A.vGoals;
+  if(templateMode(p)){const nT=goals.length?nW:12;const weeks=buildTemplateWeeks(p,logs||[],A,start,nT);applyAdaptations(weeks,logs||[]);return {weeks,A,cur,start,nW:nT,tpl:true};}
 
   // Volume de course semaine par semaine
   const race=A.raceGoal;
@@ -651,13 +877,24 @@ function applyAdaptations(weeks,logs){
     const o=X.overrides[s.id];
     if(o&&o!==s.date){const d=parseDate(o);if(d&&daysBetween(w.start,d)>=0&&daysBetween(w.start,d)<=6){s.movedFrom=s.date;s.date=o;s.day=dayIdx(d);}}
     // 2) Cibles ajustées d'après la dernière exécution de chaque exercice
-    if(s.date>=ts&&!w.deload&&(s.log==='sw')&&!logs.some(l=>l.plannedId===s.id)){
+    if(s.date>=ts&&!w.deload&&!s.prog&&(s.log==='sw')&&!logs.some(l=>l.plannedId===s.id)){
       for(const b of s.blocks){
         if(b.t!=='ex'||typeof b.cible!=='number')continue;
         const prev=logs.filter(l=>l.statut!=='annulee'&&l.date<s.date&&daysBetween(parseDate(l.date),parseDate(s.date))<=28&&(l.sets||[]).some(x=>x.nom===b.nom&&x.cible!=null)).sort((a,c)=>a.date<c.date?1:-1)[0];
         if(!prev)continue;
         const st=prev.sets.find(x=>x.nom===b.nom);const done=st.vals.filter(v=>v!=null);if(!done.length)continue;
         const lastC=+st.cible,step=b.unite==='s'?2:1,mean=done.reduce((a,c)=>a+c,0)/done.length;
+        if(b.res){
+          if(st.res==null)continue;
+          b.lastRes=st.res;
+          const ok=done.length===st.vals.length&&done.every(v=>v>=lastC)&&(prev.rpe==null||prev.rpe<=7);
+          const ko=mean<lastC*0.8;
+          const target=ok?Math.min(120,st.res+5):ko?Math.max(5,st.res-5):st.res;
+          b.lastRes=target;
+          b.charge=`Élastiques : vise ${target} kg (${ok?'+5 kg, toutes les séries réussies':ko?'−5 kg, cibles manquées':'même résistance'} le ${fmtDate(parseDate(prev.date))})`;
+          if(target!==st.res)b.adj=`${target>st.res?'Résistance augmentée':'Résistance réduite'} : ${st.res} → ${target} kg.`;
+          continue;
+        }
         const success=done.length===st.vals.length&&done.every(v=>v>=lastC)&&(prev.rpe==null||prev.rpe<=7);
         const fail=mean<lastC*0.8||done.length<st.vals.length*0.75;
         let nc=b.cible;
@@ -835,6 +1072,22 @@ function setsReps(max,pct,deload,minSeries,maxSeries){
   if(deload)series=Math.max(2,series-2);
   return {series,reps};
 }
+/* Pack SmartWorkout Élite : barre de 106 cm + 7 élastiques à mousquetons (5, 10, 15, 2 × 20, 2 × 25 kg, total 120 kg).
+   La résistance se règle en combinant les élastiques ; on prescrit à l'effort (répétitions en réserve), pas au kilo,
+   car la tension d'un élastique dépend de son étirement. */
+const SW_LIB={
+  'Dos':['Oiseau Debout Face','Pull-Over (Poulie Haute)','Rameur','Rowing Buste Penché (Prise Supination)','Rowing Buste Penché (Prise Large)','Tirage Bucheron (Poulie Basse)','Tirage Buste Penché','Tirage Horizontal (Bandes de Résistance)','Tirage Horizontal Unilatéral - Côté DROIT','Tirage Horizontal Unilatéral Face','Tirage Horizontal Unilatéral - Côté GAUCHE','Tirage Poulie Basse','Tirage Poulie Basse (Supination)','Tirage Vertical (Poulie Haute)','Tirage Vertical (Prise Serrée)','Tirage Vertical (Supination)','Tirage Vertical Unilatéral','Tirage Vertical Unilatéral Face'],
+  'Épaules':['Boxe','Cuban Press','Développé Arnold','Développé Debout','Développé Militaire Assis','Développé Militaire Debout','Élévation Frontale Marteau','Élévation Latérale','Élévation Latérale Unilatérale','Élévations Frontales','Élévations Latérales','Face Pull (Poulie Basse)','Face Pull (Poulie Haute)','Jumping Jacks','Oiseau','Oiseau Debout Face','Overhead Press','Reverse Fly (Poulie Moyenne)','Reverse Fly Unilatéral (Poulie Moyenne)','Thruster','Thruster (bande de résistance)','Tirage Menton'],
+  'Bras':['Curl Biceps','Curl Biceps (Poulie Basse)','Curl Biceps avec Poignées','Curl Biceps en Pronation','Curl Biceps Face à la Porte','Curl Biceps Prise Marteau','Curl Marteau','Curl Marteau (Poulie Basse)','Curl Marteau Unilatéral','Curl Supination Face','Curl Supination Unilatéral','Dips','Extension Triceps (Poulie Haute)','Extension Triceps Nuque Unilatérale','Extension Triceps Unilatérale','Extension Triceps Verticale','Extension Triceps Verticale (Poulie Basse)','Kickback Triceps (Poulie Basse)','Kickback Triceps Unilatéral - Côté DROIT','Kickback Triceps Unilatéral - Côté GAUCHE'],
+  'Pectoraux':['Développé Debout','Développé Debout (2 Ancrages)','Développé Debout (Poulie Moyenne)','Développé Décliné','Développé Incliné','Développé Joint (Poulie Basse)','Développé Joint (Poulie Haute)','Développé Joint (Poulie Moyenne)','Écarté Unilatéral (Poulie Basse)','Écarté Unilatéral (Poulie Haute)','Écarté Unilatéral DROIT (Poulie Moyenne)','Écarté Unilatéral GAUCHE (Poulie Moyenne)','Pompes','Pompes à Genoux','Pompes Lestées','Pompes Lestées avec Bandes','Pompes Surélevées'],
+  'Fessiers':['Abduction de Hanches DROITE','Abduction de Hanches GAUCHE','Abductions latérales','Adduction de Hanches','Battement de jambes','Bird Dog droite','Bird Dog gauche','Burpees Niveau 1','Burpees Niveau 2','Burpees Niveau 3','Ciseaux','Crab walk','Donkey Kick (Jambes Fléchies)','Donkey Kick jambe DROITE','Donkey Kick jambe GAUCHE','Double Crunch','Fentes alternées','Fentes Arrière','Fentes Bulgares jambe DROITE','Fentes Bulgares Face','Fentes Bulgares jambe GAUCHE','Fentes jambe DROITE','Fentes jambe GAUCHE','Fentes Sautées','Fentes Statiques Face','Fire hydrants','Front Squat','Gainage Latéral droit','Gainage Latéral gauche','Glute bridge','Hip Thrust','Hip Thrust (PDC)','Hip Thrust avec Bandes','Hip Thrust Unilatéral (PDC)','Kickback','Leg Raise','Montées de Genoux Niveau 1','Montées de Genoux Niveau 2','Mountain Climbers','Patineur','Relevé de bassin iso avec abduction','Relevé de jambes','Soulevé de Terre','Soulevé de Terre (Prise Large)','Soulevé de Terre avec Bandes','Soulevé de Terre Sumo Face','Sprawls','Squat','Squat (bande de résistance)','Squat Jump','Squat pulse','Squat Sumo','Step-up droite','Step-up gauche'],
+  'Jambes':['Burpees Niveau 1','Burpees Niveau 2','Burpees Niveau 3','Extensions Mollets','Fentes alternées','Fentes Arrière','Fentes Bulgares jambe DROITE','Fentes Bulgares Face','Fentes Bulgares jambe GAUCHE','Fentes jambe DROITE','Fentes jambe GAUCHE','Fentes Sautées','Fentes Statiques Face','Footing','Front Squat','Good Morning','Jumping Jacks','Leg Curl (Poulie Basse)','Leg Extension Unilatérale','Montées de Genoux Niveau 1','Montées de Genoux Niveau 2','Patineur','Soulevé de Terre Roumain','Soulevé de Terre Sumo Face','Sprawls','Squat','Squat (bande de résistance)','Squat Jump','Squat pulse','Squat Sumo','Step-up droite','Step-up gauche','Thruster','Thruster (bande de résistance)'],
+  'Abdominaux':['Abdos Pieds à Pieds','Abdos Toucher d’Orteils','Battement de jambes','Ciseaux','Criss Cross','Crunch','Crunch à la Poulie Haute','Dead bug','Double Crunch','Gainage Face','Gainage Latéral droit','Gainage Latéral gauche','Hollow','Leg Raise','Mountain Climbers','Planche bras tendus','Planche Commando','Relevé de jambes','Sit-up','Spiderman']
+};
+/* Exercice de l'app : nom exact + rubrique où trouver la vidéo + variantes de la même famille dans l'app */
+function appx(nom,cat,series,cible,start,extra){return swx(nom,series,cible,start,Object.assign({app:cat},extra||{}));}
+function hasSW(p){return (p.materiel||[]).includes('smartworkout');}
+function swx(nom,series,cible,start,extra){return exo(nom,series,cible,'reps',Object.assign({res:true,charge:`Élastiques combinés : point de départ ≈ ${start} kg, ajuste pour garder 2 répétitions en réserve`},extra||{}));}
 function bands(p){return (p.elastiques||[]).filter(b=>num(b.max)>0).slice().sort((a,b)=>num(a.max)-num(b.max)||(num(a.min)||0)-(num(b.min)||0));}
 function bandName(b){if(!b)return '';const mn=num(b.min);return `${b.nom||'Élastique'} (${mn!=null?fr(mn)+'–':''}${fr(num(b.max))} kg)`;}
 function useBand(p,u){if(!bands(p).length)return false;const us=p.elasUsage;return !us||!us.length||us.includes(u);}
@@ -856,13 +1109,13 @@ function pullBlock(ctx,w,ph){
   if(c.pullups<1){
     if(bPull)ex.push(assisted(bPull));
     ex.push(exo('Tractions négatives (descente en 5 s)',dl?2:4,3,'reps',{repos:'2 min',note:'Monte avec un saut ou une marche, descends le plus lentement possible.'}));
-    if(!bPull)ex.push(exo('Tractions australiennes (rangées sous barre basse)',3,dl?6:[8,10,12][kk],'reps',{repos:'90 s'}));
+    if(!bPull)ex.push(hasSW(p)?appx('Rowing Buste Penché (Prise Large)','Dos',3,dl?8:[10,12,12][kk],30,{repos:'90 s',alt:['Rowing Buste Penché (Prise Supination)','Tirage Buste Penché','Tirage Horizontal (Bandes de Résistance)'],note:'Coudes près du corps, omoplates serrées en fin de mouvement.'}):exo('Tractions australiennes (rangées sous barre basse)',3,dl?6:[8,10,12][kk],'reps',{repos:'90 s'}));
     ex.push(exo('Suspension active (dead hang, omoplates engagées)',3,dl?20:[20,30,40][Math.min(w.ps.k,2)],'s',{repos:'60 s'}));
   }else if(c.pullups<5){
     ex.push(exo('Tractions strictes',dl?3:5,Math.max(1,c.pullups-1),'reps',{repos:'2 min 30',note:'Bras tendus en bas, menton au-dessus de la barre en haut.'}));
     ex.push(exo('Tractions négatives (descente en 5 s)',dl?2:3,3,'reps',{repos:'2 min'}));
     if(bPull){const lb=pickBand(p,p.trAssBand,num(p.trAssReps),10,'heavy');ex.push(Object.assign(assisted(lb),{series:3,cible:dl?6:[8,9,10][kk],note:'Séries de volume après les tractions strictes.'}));}
-    else ex.push(exo('Tractions australiennes',3,dl?6:10,'reps',{repos:'90 s'}));
+    else ex.push(hasSW(p)?appx('Rowing Buste Penché (Prise Large)','Dos',3,dl?8:10,35,{repos:'90 s',alt:['Rowing Buste Penché (Prise Supination)','Tirage Buste Penché']}):exo('Tractions australiennes',3,dl?6:10,'reps',{repos:'90 s'}));
   }else{
     const weighted=ph==='Développement'&&!dl&&c.pullups>=10&&has(p,'lest');
     if(weighted){
@@ -884,6 +1137,7 @@ function pullBlock(ctx,w,ph){
       if(s<5)ex.push(exo(`Négatifs de front lever ${FL_STAGES[Math.min(5,s+1)].toLowerCase()}`,dl?2:3,3,'reps',{repos:'2 min',note:'Descente contrôlée de 3 à 5 s.'}));
     }
   }
+  if(hasSW(p))ex.push(exo('Face Pull (Poulie Haute)',3,15,'reps',{res:true,app:'Épaules',alt:['Reverse Fly (Poulie Moyenne)','Oiseau Debout Face','Cuban Press'],charge:'Élastiques légers : 5 à 15 kg',repos:'60 s',note:'Tire vers le front en écartant les mains. Prévention de l’épaule pour l’attaque au volley.'}));
   ex.push(exo('Relevés de jambes suspendu',3,dl?6:[8,10,12][Math.min(w.ps.k,2)],'reps',{repos:'90 s'}));
   return ex;
 }
@@ -900,18 +1154,19 @@ function pushBlock(ctx,w,ph){
     else{const sr=setsReps(c.dips,pct,dl,4,5);ex.push(exo('Dips stricts',sr.series,sr.reps,'reps',{repos:'2 min'}));}
   }
   if(c.pushups<5)ex.push(exo('Pompes sur les genoux ou mains surélevées',3,dl?6:10,'reps',{repos:'90 s'}));
+  else if(hasSW(p)&&c.pushups>=25&&!goals.has('pushups'))ex.push(appx('Pompes Lestées avec Bandes','Pectoraux',dl?3:4,dl?8:[8,10,12][kk],15,{repos:'90 s',alt:['Pompes Lestées','Développé Debout (2 Ancrages)'],note:'L’élastique passe dans le dos, sous les mains : la charge est maximale en haut du mouvement.'}));
   else{const sr=setsReps(c.pushups,pct,dl,3,4);ex.push(exo(goals.has('pushups')?'Pompes strictes':'Pompes (variante diamant ou déclinées)',sr.series,goals.has('pushups')?sr.reps:Math.max(3,Math.round(sr.reps*0.7)),'reps',{repos:'90 s'}));}
   if(goals.has('handstand')){
     if(c.handstandWall<30)ex.push(exo('Équilibre au mur (ventre face au mur)',4,dl?20:[20,30,40][Math.min(w.ps.k,2)],'s',{repos:'60 s'}));
     else ex.push(exo('Équilibre libre : meilleure tentative par série',dl?4:6,Math.max(3,Math.round((c.handstand||3)*1.1)),'s',{repos:'60 s',note:'10 minutes de pratique, tenues propres uniquement.'}));
-  }else ex.push(exo('Pompes piquées (pike push-ups)',3,dl?5:8,'reps',{repos:'90 s'}));
+  }else ex.push(hasSW(p)&&!goals.has('planche')?appx('Développé Militaire Debout','Épaules',3,dl?8:10,20,{repos:'90 s',alt:['Overhead Press','Développé Arnold'],note:'Gainage serré, pas de cambrure.'}):exo('Pompes piquées (pike push-ups)',3,dl?5:8,'reps',{repos:'90 s'}));
   if(goals.has('planche')){
     const s=c.planche;
     ex.push(exo(s<=1?'Planche lean (inclinaison avant)':`Planche ${PL_STAGES[s].toLowerCase()} (tenue)`,dl?3:5,dl?8:[10,12,15][Math.min(w.ps.k,2)],'s',{repos:'2 min'}));
     if(s<5&&useBand(p,'planche'))ex.push(exo(`Planche ${PL_STAGES[Math.min(5,Math.max(s,1)+1)].toLowerCase()} assistée à l’élastique`,dl?3:4,dl?5:[6,8,10][kk],'s',{repos:'2 min',band:bandName(pickBand(p,null,null,0,'mid')),note:'Élastique attaché en hauteur ou à la barre, passé sous les hanches.'}));
   }
   if(goals.has('lsit'))ex.push(exo('L-sit (ou tuck L-sit)',dl?3:5,Math.max(5,Math.round((c.lsit||5)*0.7)),'s',{repos:'90 s'}));
-  ex.push(exo('Rotateurs externes à l’élastique',3,15,'reps',{repos:'45 s',band:bands(p).length&&useBand(p,'echauffement')?bandName(bands(p)[0]):'',note:'Prévention de l’épaule : indispensable avec le volley. Toujours l’élastique le plus léger.'}));
+  ex.push(exo('Rotateurs externes à l’élastique',3,15,'reps',{repos:'45 s',band:bands(p).length&&useBand(p,'echauffement')?bandName(bands(p)[0]):(hasSW(p)?'5 kg du pack SmartWorkout, poignée + ancrage de porte à hauteur du coude':''),note:'Prévention de l’épaule : indispensable avec le volley. Toujours l’élastique le plus léger.'}));
   return ex;
 }
 function swSessionsFor(w,ctx){
@@ -932,10 +1187,10 @@ function swSessionsFor(w,ctx){
     else if(k==='push')out.push(mk('sw-push','Poussée & équilibre',pushBlock(ctx,w,ph)));
     else if(k==='third'){
       if(skill){const ex=[...pullBlock(ctx,w,ph).filter(e=>/front lever|muscle|Transitions|explosives/i.test(e.nom)),...pushBlock(ctx,w,ph).filter(e=>/Équilibre|Planche|L-sit/i.test(e.nom))];
-        if(ex.length<2)ex.push(exo('Hollow body (tenue)',3,30,'s',{repos:'60 s'}));
+        if(ex.length<2)ex.push(exo('Hollow',3,30,'s',{repos:'60 s',app:'Abdominaux',alt:['Dead bug','Planche bras tendus']}));
         ex.push(exo('Pistol squat (ou squat bulgare)',3,6,'reps',{repos:'90 s',note:'Par jambe.'}));
         out.push(mk('sw-skill','Skills & force statique',ex));}
-      else{const pb=pullBlock(ctx,w,ph),ps=pushBlock(ctx,w,ph);out.push(mk('sw-full','Full body volume',[pb[0],ps[0],ps[1],exo('Pistol squat (ou squat bulgare)',3,6,'reps',{repos:'90 s',note:'Par jambe.'}),exo('Hollow body (tenue)',3,30,'s',{repos:'60 s'})]));}
+      else{const pb=pullBlock(ctx,w,ph),ps=pushBlock(ctx,w,ph);out.push(mk('sw-full','Full body volume',[pb[0],ps[0],ps[1],exo('Pistol squat (ou squat bulgare)',3,6,'reps',{repos:'90 s',note:'Par jambe.'}),exo('Hollow',3,30,'s',{repos:'60 s',app:'Abdominaux',alt:['Dead bug','Planche bras tendus']})]));}
     }
     else if(k==='A'){const pb=pullBlock(ctx,w,ph),ps=pushBlock(ctx,w,ph);out.push(mk('sw-A','Full body A (dominante tirage)',[...pb.slice(0,2),ps[0],pb[pb.length-1],ps[ps.length-1]]));}
     else{const pb=pullBlock(ctx,w,ph),ps=pushBlock(ctx,w,ph);out.push(mk('sw-B','Full body B (dominante poussée)',[...ps.slice(0,ps.length-1),pb[0],ps[ps.length-1]]));}
@@ -966,10 +1221,10 @@ function plyoSessionsFor(w,ctx){
     }
     if(ph==='Fondation'||ph==='Entretien'||ph==='Récupération'){
       title='Force des jambes & pliométrie de base';contacts=[60,70,80][k];
-      ex=[exo('Squat bulgare',3,[8,8,10][k],'reps',{repos:'90 s',note:'Par jambe. Lesté si tu as du matériel.'}),exo('Pont fessier unilatéral',3,12,'reps',{repos:'60 s',note:'Par jambe.'}),exo('Sauts pieds joints sur place (pogo)',3,15,'reps',{repos:'60 s',note:'Contact au sol très court, chevilles toniques.'}),exo('Saut vertical avec flexion (CMJ)',3,5,'reps',{repos:'90 s',note:'Intention maximale à chaque saut.'}),exo('Nordic ischios (descente contrôlée)',3,4,'reps',{repos:'90 s'}),exo('Mollets excentriques sur une marche',3,12,'reps',{repos:'60 s'})];
+      ex=[hasSW(ctx.p)?appx('Front Squat','Jambes',4,[8,8,10][k],45,{repos:'2 min',alt:['Squat (bande de résistance)','Fentes Bulgares Face'],note:'Descente contrôlée, remontée rapide.'}):exo('Squat bulgare',3,[8,8,10][k],'reps',{repos:'90 s',note:'Par jambe. Lesté si tu as du matériel.'}),hasSW(ctx.p)?appx('Soulevé de Terre Roumain','Jambes',3,10,40,{repos:'90 s',alt:['Good Morning','Soulevé de Terre avec Bandes'],note:'Dos plat, hanches vers l’arrière : cible les ischio-jambiers.'}):exo('Pont fessier unilatéral',3,12,'reps',{repos:'60 s',note:'Par jambe.'}),exo('Sauts pieds joints sur place (pogo)',3,15,'reps',{repos:'60 s',note:'Contact au sol très court, chevilles toniques.'}),exo('Saut vertical avec flexion (CMJ)',3,5,'reps',{repos:'90 s',note:'Intention maximale à chaque saut.'}),exo('Nordic ischios (descente contrôlée)',3,4,'reps',{repos:'90 s'}),exo('Mollets excentriques sur une marche',3,12,'reps',{repos:'60 s'})];
     }else if(ph==='Développement'){
       title='Puissance : force + pliométrie';contacts=[80,90,100][k];
-      ex=[exo('Squat bulgare lesté (ou pistol squat)',4,6,'reps',{repos:'2 min',note:'Par jambe. Charge lourde, 2 répétitions en réserve.'}),exo('Sauts sur box',4,5,'reps',{repos:'90 s',note:'Redescends en marchant, pas en sautant.'}),exo('Bonds horizontaux enchaînés',3,5,'reps',{repos:'2 min'}),exo('Saut vertical avec flexion (CMJ)',4,5,'reps',{repos:'90 s'}),exo('Course d’élan d’attaque + saut maximal',3,4,'reps',{repos:'2 min'}),exo('Nordic ischios',3,5,'reps',{repos:'90 s'})];
+      ex=[hasSW(ctx.p)?appx('Front Squat','Jambes',4,6,60,{repos:'2 min',alt:['Squat (bande de résistance)'],note:'Résistance forte, remontée la plus rapide possible : c’est ce qui transfère au saut.'}):exo('Squat bulgare lesté (ou pistol squat)',4,6,'reps',{repos:'2 min',note:'Par jambe. Charge lourde, 2 répétitions en réserve.'}),exo('Sauts sur box',4,5,'reps',{repos:'90 s',note:'Redescends en marchant, pas en sautant.'}),exo('Bonds horizontaux enchaînés',3,5,'reps',{repos:'2 min'}),exo('Saut vertical avec flexion (CMJ)',4,5,'reps',{repos:'90 s'}),exo('Course d’élan d’attaque + saut maximal',3,4,'reps',{repos:'2 min'}),hasSW(ctx.p)?appx('Hip Thrust avec Bandes','Fessiers',3,8,45,{repos:'90 s',alt:['Hip Thrust','Hip Thrust Unilatéral (PDC)'],note:'Montée explosive, 1 s de contraction en haut. Les fessiers sont le moteur de l’impulsion.'}):exo('Pont fessier unilatéral',3,10,'reps',{repos:'60 s',note:'Par jambe.'}),exo('Nordic ischios',3,5,'reps',{repos:'90 s'})];
     }else{
       title=ph==='Affûtage'?'Activation explosive (affûtage)':'Pliométrie spécifique volley';contacts=ph==='Affûtage'?40:[70,70,60][k];
       ex=[fragile?exo('Sauts sur box (hauteur maximale)',4,4,'reps',{repos:'2 min'}):exo('Drop jumps (chute de 30–40 cm puis saut maximal)',4,5,'reps',{repos:'2 min',note:'Contact au sol le plus court possible.'}),exo('Course d’élan d’attaque + saut maximal',ph==='Affûtage'?3:4,3,'reps',{repos:'2 min',note:'Récupération complète : on travaille la qualité.'}),exo('Saut vertical avec flexion (CMJ)',3,4,'reps',{repos:'90 s'}),exo('Squat bulgare',3,5,'reps',{repos:'2 min',note:'Par jambe, charge lourde et vitesse de montée maximale.'})];
@@ -1083,7 +1338,8 @@ function goalSeries(g,p,logs,A){
   const d0=since?parseDate(since):A.start;
   const key=g.type,def=g.def;
   if(def.kind==='time'){
-    const ref0=num(p.refDist)&&parseTime(p.refTemps)?riegel(parseTime(p.refTemps)*(REF_AGE[p.refAge]||1),num(p.refDist),def.dist):null;
+    const r0=parseTime(p.ref5)?{d:5,t:parseTime(p.ref5)}:parseTime(p.ref10)?{d:10,t:parseTime(p.ref10)}:(num(p.refDist)&&parseTime(p.refTemps)?{d:num(p.refDist),t:parseTime(p.refTemps)}:null);
+    const ref0=r0?riegel(r0.t*(REF_AGE[p.refAge]||1),r0.d,def.dist):null;
     if(ref0)pts.push({x:+d0,y:ref0,src:'Questionnaire'});
     for(const l of logs){if(l.statut==='annulee')continue;const r=l.tests&&l.tests.run;if(r&&r.sec&&r.dist&&(!since||l.date>=since))pts.push({x:+parseDate(l.date),y:riegel(+r.sec,+r.dist,def.dist),src:`Chrono ${fr(r.dist)} km : ${fmtTime(r.sec)}`});}
   }else if(def.kind==='finish'||def.kind==='volume'){
@@ -1259,7 +1515,7 @@ function renderLive(){
       <span class="eyebrow">Repos</span>
       <div class="live-big" id="liveCount">${fmtTime(left)}</div>
       <div class="restbar"><i id="liveRestBar" style="width:${Math.round((1-left/L.rest.total)*100)}%"></i></div>
-      <div class="card stack"><span class="eyebrow">Ensuite</span><b>${esc(nx.nom)}</b><span class="small muted">Série ${L.set+1} sur ${L.vals[L.ex].length} · cible ${nx.cible}${nx.unite==='s'?' s':''}${nx.band?' · élastique '+esc(nx.band):''}</span></div>
+      <div class="card stack"><span class="eyebrow">Ensuite</span><b>${esc(nx.nom)}</b><span class="small muted">Série ${L.set+1} sur ${L.vals[L.ex].length} · objectif ${nx.range||nx.cible}${nx.unite==='s'?' s':''}${nx.band?' · élastique '+esc(nx.band):''}</span></div>
       <div class="grid g2"><button class="btn xl" data-live="rest+15">+15 s</button><button class="btn primary xl" data-live="skiprest">Passer le repos</button></div>
       <p class="small muted">Un signal sonore et une vibration (si ton téléphone le permet) marquent la fin du repos.</p></div>`;
     clearInterval(liveTimer);
@@ -1271,10 +1527,12 @@ function renderLive(){
   el.innerHTML=`<div class="live-in">${top}
     <div class="row between"><span class="eyebrow">Exercice ${L.ex+1} sur ${exs.length}</span>${dots}</div>
     <div class="live-ex">${esc(e.nom)}</div>
-    <div class="row small"><span class="pill info">Série ${L.set+1} / ${L.vals[L.ex].length}</span><span class="pill info">Cible ${e.cible} ${unit}</span>${e.charge?`<span class="pill info">${esc(e.charge)}</span>`:''}${e.band?`<span class="pill info">Élastique ${esc(e.band)}</span>`:''}</div>
-    ${e.note?`<p class="small muted">${esc(e.note)}</p>`:''}
+    ${e.app?`<p class="small" style="color:var(--accent)">Vidéo : app SmartWorkout › Exercices › ${esc(e.app)}</p>`:''}
+    <div class="row small"><span class="pill info">Série ${L.set+1} / ${L.vals[L.ex].length}</span><span class="pill info">Objectif ${e.range||e.cible} ${unit}</span>${e.charge?`<span class="pill info">${esc(e.charge)}</span>`:''}${e.band?`<span class="pill info">Élastique ${esc(e.band)}</span>`:''}</div>
+    ${e.why?`<p class="small" style="color:var(--accent)">${esc(e.why)}</p>`:''}${e.note?`<p class="small muted">${esc(e.note)}</p>`:''}
     <div class="stepper"><button class="btn" data-live="dec" aria-label="Moins">−</button><div class="live-big" id="liveVal" aria-live="polite">${L.cur}<small> ${unit}</small></div><button class="btn" data-live="inc" aria-label="Plus">+</button></div>
     ${e.unite==='s'?'<div class="grid g2"><button class="btn" data-live="dec5">− 5 s</button><button class="btn" data-live="inc5">+ 5 s</button></div>':''}
+    ${e.res?`<div class="f"><span class="lbl">Élastiques accrochés</span>${bandChips('liveBands',(L.bands&&L.bands[L.ex])||e.bandsIdx||(e.lastRes?bandsFor(e.lastRes).idx:[]))}</div>`:''}
     ${e.lest?`<div class="f"><label for="liveLest">Lest utilisé (kg)</label><input type="number" id="liveLest" min="0" max="100" step="0.5" inputmode="decimal" value="${L.lest[L.ex]??''}"></div>`:''}
     <button class="btn primary xl" data-live="validate">Valider la série</button>
     <div class="grid g2"><button class="btn" data-live="missed">Série non faite</button><button class="btn" data-live="skipex">Exercice suivant</button></div>
@@ -1284,6 +1542,7 @@ function liveAction(a){
   const L=S.live;if(!L)return;const exs=L.plan.blocks.filter(b=>b.t==='ex');const e=exs[L.ex];
   try{if(audioCtx&&audioCtx.state==='suspended')audioCtx.resume();}catch(x){}
   const lestEl=document.getElementById('liveLest');if(lestEl&&lestEl.value!=='')L.lest[L.ex]=num(lestEl.value);
+  if(document.getElementById('liveBands')){const sel=readChips('liveBands');L.bands=L.bands||[];L.res=L.res||[];L.bands[L.ex]=sel;L.res[L.ex]=sel.length?bandsSum(sel):null;}
   const goNext=(record)=>{
     L.vals[L.ex][L.set]=record;
     const np=nextPos(L);
@@ -1306,7 +1565,7 @@ function liveAction(a){
     case 'finish':{
       const dur=Math.max(1,Math.round((Date.now()-L.startedAt)/60000));
       S.editLog={id:uid(),createdAt:Date.now(),date:L.date,plannedId:L.sid,plan:L.plan,sport:L.sport,title:L.title,statut:L.vals.flat().every(v=>v!=null&&v!==undefined)?'realisee':'partielle',dureeMin:dur,
-        sets:exs.map((x,i)=>({nom:x.nom,unite:x.unite,cible:x.cible,vals:L.vals[i].map(v=>v===undefined?null:v),lest:L.lest[i],band:x.band||null})),_new:true};
+        sets:exs.map((x,i)=>({nom:x.nom,unite:x.unite,cible:x.cible,vals:L.vals[i].map(v=>v===undefined?null:v),lest:L.lest[i],band:x.band||null,res:(L.res&&L.res[i]!=null)?L.res[i]:null,bands:(L.bands&&L.bands[i])||null})),_new:true};
       S.live=null;lsSet(LS_LIVE,null);closeLive();S.draftSession=null;go('suivi');toast('Répétitions remplies : ajoute ton effort ressenti et enregistre.');return;}
     case 'abandon':S.live=null;lsSet(LS_LIVE,null);closeLive();toast('Séance en cours abandonnée.');render();return;
   }
@@ -1506,7 +1765,7 @@ function drawDashboardCharts(){
 /* ---------- Questionnaire ---------- */
 const STEPS=['Profil & santé','Disponibilités','Street workout','Course à pied','Volley','Objectifs'];
 const ZONES=[['epaule','Épaule'],['coude','Coude'],['poignet','Poignet'],['dos','Dos / lombaires'],['hanche','Hanche'],['genou','Genou'],['cheville','Cheville'],['achille','Tendon d’Achille'],['ischios','Ischio-jambiers'],['mollet','Mollet']];
-const MATERIEL=[['barre','Barre de traction'],['paralleles','Barres parallèles / dips'],['anneaux','Anneaux'],['elastiques','Élastiques'],['lest','Gilet ou ceinture lestée'],['box','Box / plinth'],['piste','Piste d’athlétisme'],['montre','Montre GPS / cardio']];
+const MATERIEL=[['barre','Barre de traction'],['paralleles','Barres parallèles / dips'],['anneaux','Anneaux'],['elastiques','Élastiques'],['lest','Gilet ou ceinture lestée'],['box','Box / plinth'],['piste','Piste d’athlétisme'],['montre','Montre GPS / cardio'],['smartworkout','Pack SmartWorkout Élite (barre + 7 élastiques)']];
 function draft(){return S.qDraft||(S.qDraft=JSON.parse(JSON.stringify(S.profile||{debut:toStr(today()),jours:['lun','mer','ven','sam'],seancesMax:5,dureeMax:60,dureeWE:120,objectifs:[]})));}
 function fNum(id,label,v,o={}){return `<div class="f ${o.wide?'wide':''}"><label for="${id}">${label}</label><input type="number" id="${id}" inputmode="decimal" ${o.min!=null?`min="${o.min}"`:''} ${o.max!=null?`max="${o.max}"`:''} step="${o.step||'any'}" value="${v==null?'':esc(v)}" placeholder="${esc(o.ph||'')}">${o.hint?`<span class="hint">${o.hint}</span>`:''}<span class="errmsg" id="${id}_e"></span></div>`;}
 function fTxt(id,label,v,o={}){return `<div class="f ${o.wide?'wide':''}"><label for="${id}">${label}</label><input type="text" id="${id}" value="${v==null?'':esc(v)}" placeholder="${esc(o.ph||'')}">${o.hint?`<span class="hint">${o.hint}</span>`:''}<span class="errmsg" id="${id}_e"></span></div>`;}
@@ -1542,6 +1801,7 @@ function renderQuestionnaire(){
       ${fSel('q_creneau','Créneau habituel',d.creneau||'soir',[['matin','Matin'],['midi','Midi'],['soir','Soir'],['variable','Variable']])}
       <div class="f wide"><label class="chk" style="width:fit-content"><input type="checkbox" id="q_doubles" ${d.doubles?'checked':''}> J’accepte deux séances le même jour (ex. footing le matin, street workout le soir)</label></div>
       ${fChecks('q_materiel','Matériel et lieux accessibles',d.materiel,MATERIEL)}
+      ${tplEditorHtml(d)}
     </div></fieldset>`,
     `<fieldset><legend><h3>Street workout : performances actuelles</h3><p class="muted small">Répétitions strictes d’affilée, sans élan, amplitude complète. Si tu ne sais pas, teste-toi avant de répondre : tout le programme en dépend.</p></legend><div class="fields">
       ${fSel('q_swAnc','Ancienneté de pratique',d.swAnc||'6-24',[['0-6','Moins de 6 mois'],['6-24','6 mois à 2 ans'],['2-5','2 à 5 ans'],['5+','Plus de 5 ans']])}
@@ -1563,8 +1823,9 @@ function renderQuestionnaire(){
       ${fNum('q_kmSemaine','Kilomètres par semaine (moyenne des 4 dernières semaines)',d.kmSemaine,{min:0,max:200,step:1})}
       ${fNum('q_runSeances','Sorties par semaine actuellement',d.runSeances,{min:0,max:10,step:1})}
       ${fNum('q_sortieLongue','Plus longue sortie des 4 dernières semaines (km)',d.sortieLongue,{min:0,max:60,step:0.5})}
-      ${fSel('q_refDist','Distance de ton meilleur chrono récent',d.refDist||'',[['','Aucun chrono'],['5','5 km'],['10','10 km'],['21.0975','Semi-marathon'],['42.195','Marathon']])}
-      ${fTxt('q_refTemps','Chrono réalisé',d.refTemps,{ph:'mm:ss ou h:mm:ss',hint:'Ex. 24:30 pour un 5 km, 1:52:00 pour un semi.'})}
+      ${fTxt('q_ref5','Meilleur chrono récent sur 5 km',d.ref5,{ph:'mm:ss, ex. 30:50'})}
+      ${fTxt('q_ref10','Meilleur chrono récent sur 10 km',d.ref10,{ph:'mm:ss ou h:mm:ss, ex. 1:04:30'})}
+      ${fTxt('q_allureBase','Allure habituelle en footing (par km)',d.allureBase,{ph:'mm:ss, ex. 7:30',hint:'Sert seulement si tu n’as aucun chrono.'})}
       ${fSel('q_refAge','Ce chrono date de…',d.refAge||'3',[['1','Moins d’un mois'],['3','1 à 3 mois'],['6','3 à 6 mois'],['12','Plus de 6 mois']],{hint:'Un chrono ancien est corrigé à la baisse (perte de forme probable).'})}
     </div></fieldset>`,
     `<fieldset><legend><h3>Volley</h3><p class="muted small">Les entraînements et matchs déclarés ici sont fixes : le programme s’organise autour (pas de pliométrie ni de séance dure la veille d’un match).</p></legend><div class="fields">
@@ -1604,7 +1865,7 @@ function bandRow(b,i){return `<div class="bandrow" data-band="${i}">
 function bandSectionHtml(d){
   const bs=d.elastiques||[];
   return `<div class="stack" style="border-top:1px solid var(--line);padding-top:16px">
-    <div><h4>Élastiques de musculation</h4><p class="small muted">Liste chaque élastique que tu possèdes. La résistance figure sur l’étiquette ou la notice, souvent sous forme de fourchette (ex. 15–35 kg) : la valeur max correspond à l’élastique très étiré. Ne rien ajouter si tu n’en as pas.</p></div>
+    <div><h4>Élastiques de musculation</h4><p class="small muted">Liste chaque élastique que tu possèdes. La résistance figure sur l’étiquette ou la notice, souvent sous forme de fourchette (ex. 15–35 kg) : la valeur max correspond à l’élastique très étiré. Ne rien ajouter si tu n’en as pas. Les élastiques à mousquetons du pack SmartWorkout ne vont pas ici : coche simplement « Pack SmartWorkout Élite » à l’étape 2 (matériel). Cette liste sert aux élastiques en boucle qui aident aux tractions et aux dips.</p></div>
     <div class="stack" id="bandList">${bs.map((b,i)=>bandRow(b,i)).join('')}</div>
     <div class="row"><button type="button" class="btn" data-act="add-band" ${bs.length>=8?'disabled':''}>Ajouter un élastique</button></div>
     ${bs.length?`<div class="fields">
@@ -1624,6 +1885,14 @@ function readBands(){
 function refreshBandSelects(){
   const d=draft();const b=readBands();if(b)d.elastiques=b;
   for(const id of ['q_trAssBand','q_dpAssBand']){const s=document.getElementById(id);if(!s)continue;const v=s.value;s.innerHTML=bandOpts(d).map(([k,l])=>`<option value="${esc(k)}" ${k===v?'selected':''}>${esc(l)}</option>`).join('');}
+}
+function tplEditorHtml(d){
+  const tpl=weekTemplate(d);
+  return `<div class="f wide stack" style="border-top:1px solid var(--line);padding-top:14px">
+    <div><h4>Ta semaine type</h4><p class="small muted">Le programme répète cette semaine et fait progresser chaque séance selon tes résultats. Pour les courses, indique les kilomètres de départ : ils évoluent ensuite automatiquement jusqu’au volume visé.</p></div>
+    <div class="tblwrap"><table class="ex"><tbody>${DAY_NAMES.map((dn,di)=>`<tr><td style="width:96px"><b>${dn}</b></td><td><div class="checks">${TPL_TYPES.map(([t,lab])=>{const it=(tpl.days[di]||[]).find(x=>x.t===t);return `<label class="chk"><input type="checkbox" id="tpl_${di}_${t}" ${it?'checked':''}> ${esc(lab)}${TPL_KM[t]!=null?` <input type="number" id="tplkm_${di}_${t}" min="2" max="42" step="0.5" value="${it&&it.km?it.km:TPL_KM[t]}" style="width:64px;min-height:30px;padding:3px 6px" aria-label="Kilomètres ${esc(lab)} ${dn}"> km`:''}</label>`;}).join('')}</div><span class="errmsg" id="tpl_${di}_e"></span></td></tr>`).join('')}</tbody></table></div>
+    <div class="fields">${fNum('q_volMax','Volume de course visé (km par semaine)',tpl.volMax||40,{min:10,max:150,step:1,hint:'Le volume monte de 10 % après chaque semaine réussie, sans dépasser cette valeur.'})}</div>
+  </div>`;
 }
 function goalRow(g,i){
   const def=GOALS[g.type]||GOALS.run10;
@@ -1648,10 +1917,11 @@ function readQForm(){
     debut:'q_debut',seancesMax:'q_seancesMax',dureeMax:'q_dureeMax',dureeWE:'q_dureeWE',creneau:'q_creneau',
     trAssBand:'q_trAssBand',trAssReps:'q_trAssReps',dpAssBand:'q_dpAssBand',dpAssReps:'q_dpAssReps',
     swAnc:'q_swAnc',tractions:'q_tractions',dips:'q_dips',pompes:'q_pompes',muscleup:'q_muscleup',fl:'q_fl',planche:'q_planche',handstandMur:'q_handstandMur',handstand:'q_handstand',lsit:'q_lsit',pistol:'q_pistol',
-    runAnc:'q_runAnc',kmSemaine:'q_kmSemaine',runSeances:'q_runSeances',sortieLongue:'q_sortieLongue',refDist:'q_refDist',refTemps:'q_refTemps',refAge:'q_refAge',
+    runAnc:'q_runAnc',kmSemaine:'q_kmSemaine',runSeances:'q_runSeances',sortieLongue:'q_sortieLongue',ref5:'q_ref5',ref10:'q_ref10',allureBase:'q_allureBase',refAge:'q_refAge',
     vNiveau:'q_vNiveau',vPoste:'q_vPoste',vDuree:'q_vDuree',vDetente:'q_vDetente'};
   for(const [k,id] of Object.entries(map)){const x=v(id);if(x!==undefined)d[k]=x;}
   const dbl=document.getElementById('q_doubles');if(dbl)d.doubles=dbl.checked;
+  if(document.getElementById('tpl_0_push')){const days=[];for(let di=0;di<7;di++){const list=[];for(const [t] of TPL_TYPES){if(document.getElementById(`tpl_${di}_${t}`).checked){const it={t};const km=document.getElementById(`tplkm_${di}_${t}`);if(km)it.km=km.value;list.push(it);}}days.push(list);}d.semaine={days,volMax:(document.getElementById('q_volMax')||{}).value||40};}
   for(const n of ['blessures','jours','materiel','vClubJours','vMatchJours','elasUsage']){const any=document.querySelector(`input[name="q_${n}"]`);if(any)d[n]=checks('q_'+n);}
   const bl=readBands();if(bl)d.elastiques=bl;
   if((d.elastiques||[]).some(b=>num(b.max)>0)){d.materiel=d.materiel||[];if(!d.materiel.includes('elastiques'))d.materiel.push('elastiques');}
@@ -1679,8 +1949,9 @@ function validateQ(d,onlyStep){
     if(d.trAssReps!==''&&d.trAssReps!=null&&!d.trAssBand)errs.q_trAssBand='Choisis l’élastique utilisé.';
     if(d.dpAssReps!==''&&d.dpAssReps!=null&&!d.dpAssBand)errs.q_dpAssBand='Choisis l’élastique utilisé.';}
   if(step(3)){req('q_kmSemaine',d.kmSemaine,'Indique ton volume (0 si tu ne cours pas).');rng('q_kmSemaine',d.kmSemaine,0,200);rng('q_sortieLongue',d.sortieLongue,0,60);
-    if(d.refDist){const s=parseTime(d.refTemps);if(!s)errs.q_refTemps='Format attendu : mm:ss ou h:mm:ss.';else{const pace=s/num(d.refDist);if(pace<150||pace>900)errs.q_refTemps=`Ce chrono donne ${fmtPace(pace)} : vérifie le format (h:mm:ss pour plus d’une heure).`;}}
-    else if(d.refTemps)errs.q_refDist='Choisis la distance de ce chrono.';}
+    for(const [id,k,dist] of [['q_ref5','ref5',5],['q_ref10','ref10',10]]){if(!d[k])continue;const s=parseTime(d[k]);if(!s){errs[id]='Format attendu : mm:ss ou h:mm:ss.';continue;}const pace=s/dist;if(pace<150||pace>900)errs[id]=`Ce chrono donne ${fmtPace(pace)} : vérifie le format (h:mm:ss au-delà d’une heure).`;}
+    if(d.allureBase){const s=parseTime(d.allureBase);if(!s||s<150||s>900)errs.q_allureBase='Format mm:ss, entre 2:30 et 15:00.';}}
+  if(step(1)&&d.semaine){d.semaine.days.forEach((list,di)=>{if(list.length>3)errs['tpl_'+di]='Trois séances maximum par jour.';for(const it of list)if(it.km!=null){const k=num(it.km);if(k==null||k<2||k>42)errs['tpl_'+di]='Distance entre 2 et 42 km.';}});const vm=num(d.semaine.volMax);if(vm==null||vm<10||vm>150)errs.q_volMax='Entre 10 et 150 km.';}
   if(step(4)){rng('q_vDetente',d.vDetente,5,120,'Détente');}
   if(step(5)){
     if(!(d.objectifs||[]).length)errs.goals='Ajoute au moins un objectif.';
@@ -1749,6 +2020,7 @@ function renderProgramme(){
     </div>`;}).join('')}</div>`;
 }
 function weekNote(w){
+  if(w.note)return `<div class="notice"><p><b>Volume de course.</b> ${esc(w.note)}</p><p class="small" style="margin-top:6px"><b>Allures.</b> ${esc(w.paceNote||'')}</p>${w.deload?'<p class="small" style="margin-top:6px">Semaine allégée : une série en moins en musculation, tests de force et test chrono 5 km. Les résultats recalibrent toute la suite.</p>':''}</div>`;
   const notes={Fondation:'Bloc de fondation : on construit le volume et la technique à intensité contrôlée.',Développement:'Bloc de développement : intensité en hausse, c’est ici que se fait l’essentiel des gains.',Spécifique:'Bloc spécifique : on travaille au plus près des exigences de l’objectif.',Affûtage:'Affûtage : volume en forte baisse, intensité conservée. Tu dois te sentir frais. Ne rajoute rien.',Récupération:'Semaine de récupération après ton objectif : uniquement du facile.','Semaine allégée + tests':'Semaine allégée : environ 40 % de volume en moins pour assimiler le travail. Les tests de la semaine alimentent ta courbe de progression et ajustent automatiquement tes charges.',Entretien:'Entretien : séances de maintien, sans objectif daté sur cette période.'};
   return `<div class="notice"><p>${notes[w.label]||''}</p></div>`;
 }
@@ -1758,7 +2030,7 @@ function sessionDetailHtml(s){
     <div><h2>${esc(s.title)}</h2><p class="muted">${fmtDateLong(parseDate(s.date))} · ≈ ${s.dureeMin} min · ${esc(s.intensite)}${s.plannedKm&&s.sport==='course'?' · '+fr(s.plannedKm)+' km':''}${s.movedFrom?' · déplacée du '+fmtDate(parseDate(s.movedFrom)):''}</p></div>
     ${fatigueBanner(s)}
     <div class="blocks">${s.blocks.map(b=>b.t==='txt'?`<div class="blk"><div class="h">${esc(b.h)}</div>${b.b?`<p class="small">${esc(b.b)}</p>`:''}</div>`:'').join('')}
-    ${s.blocks.some(b=>b.t==='ex')?`<div class="tblwrap"><table class="ex"><thead><tr><th>Exercice</th><th>Séries × cible</th><th>Repos</th><th>Consigne</th></tr></thead><tbody>${s.blocks.filter(b=>b.t==='ex').map(b=>`<tr><td><b>${esc(b.nom)}</b></td><td class="num">${b.series} × ${b.cible}${b.unite==='s'?' s':''}${b.charge?'<br><span class="small muted">'+esc(b.charge)+'</span>':''}${b.band?'<br><span class="small muted">Élastique : '+esc(b.band)+'</span>':''}</td><td class="num">${esc(b.repos||'')}</td><td class="small">${b.adj?'<b style="color:var(--accent)">'+esc(b.adj)+'</b><br>':''}${esc(b.note||'')}</td></tr>`).join('')}</tbody></table></div>`:''}</div>
+    ${s.blocks.some(b=>b.t==='ex')?`<div class="tblwrap"><table class="ex"><thead><tr><th>Exercice</th><th>Séries × répétitions</th><th>Repos</th><th>Consigne</th></tr></thead><tbody>${s.blocks.filter(b=>b.t==='ex').map(b=>`<tr><td><b>${esc(b.nom)}</b>${b.app?`<br><span class="tiny" style="color:var(--accent)">Vidéo : app SmartWorkout › Exercices › ${esc(b.app)}</span>${b.alt&&b.alt.length?`<br><span class="tiny muted">Variantes dans l’app : ${b.alt.map(esc).join(', ')}</span>`:''}`:''}</td><td class="num">${b.series} × ${b.range||b.cible}${b.unite==='s'?' s':''}${b.charge?'<br><span class="small muted">'+esc(b.charge)+'</span>':''}${b.band?'<br><span class="small muted">Élastique : '+esc(b.band)+'</span>':''}</td><td class="num">${esc(b.repos||'')}</td><td class="small">${b.cat?'<span class="tiny muted">'+esc(b.cat)+'</span><br>':''}${b.why?'<b style="color:var(--accent)">'+esc(b.why)+'</b><br>':''}${b.adj?'<b style="color:var(--accent)">'+esc(b.adj)+'</b><br>':''}${esc(b.note||'')}</td></tr>`).join('')}</tbody></table></div>`:''}</div>
     <div class="row">${l?`<span class="pill ${l.statut==='realisee'?'ok':l.statut==='partielle'?'warn':'bad'}">${STATUS_TXT[statusOf(s)]}</span><button class="btn" data-editlog="${l.id}">Modifier ma saisie</button>`:`${s.log==='sw'&&s.date<=toStr(today())?`<button class="btn primary" data-live-start="${s.id}">Démarrer la séance</button><button class="btn" data-log="${s.id}">Saisir sans le mode séance</button>`:`<button class="btn primary" data-log="${s.id}">Saisir cette séance</button>`}${s.date>=toStr(today())&&!s.fixedSlot&&!s.goal?`<button class="btn" data-move="${s.id}">Je ne peux pas ce jour-là</button>`:''}`}</div>`;
 }
 
@@ -1781,7 +2053,7 @@ function csvSeances(){
   for(const l of [...S.logs].sort((a,b)=>a.date<b.date?-1:1)){
     const r=l.run||{};
     rows.push([l.date,SPORT_LABEL[l.sport]||l.sport,l.title,l.statut==='realisee'?'Réalisée':l.statut==='partielle'?'Partielle':'Annulée',l.dureeMin,l.rpe,logLoad(l)||'',r.distance,r.dureeSec?fmtTime(r.dureeSec):'',r.distance&&r.dureeSec?fmtTime(r.dureeSec/r.distance):'',r.fcMoy,r.fcMax,r.dplus,
-      (l.sets||[]).map(s=>`${s.nom} : ${s.vals.map(v=>v==null?'-':v).join('/')}${s.unite==='s'?' s':''}${s.lest?' (+'+s.lest+' kg)':''}${s.band?' ['+s.band+']':''}`).join(' | '),l.sommeil,l.forme,l.douleur,l.douleurZone,l.poids,l.notes]);
+      (l.sets||[]).map(s=>`${s.nom} : ${s.vals.map(v=>v==null?'-':v).join('/')}${s.unite==='s'?' s':''}${s.lest?' (+'+s.lest+' kg)':''}${s.res?' [élastiques '+(s.bands&&s.bands.length?bandsLabel(s.bands):s.res+' kg')+']':''}${s.band?' ['+s.band+']':''}`).join(' | '),l.sommeil,l.forme,l.douleur,l.douleurZone,l.poids,l.notes]);
   }
   return csvOf(rows);
 }
@@ -2152,7 +2424,7 @@ function logItemHtml(l){
     <div class="row"><span class="pill ${l.statut==='realisee'?'ok':l.statut==='partielle'?'warn':'bad'}">${l.statut==='realisee'?'Réalisée':l.statut==='partielle'?'Partielle':'Annulée'}</span><button class="btn sm" data-editlog="${l.id}">Modifier</button></div>
   </div>`;
 }
-function planSnapshot(s){return s?{title:s.title,sport:s.sport,log:s.log,blocks:s.blocks,tests:s.tests||null,testDist:s.testDist||null,plannedKm:s.plannedKm||null,dureeMin:s.dureeMin}:null;}
+function planSnapshot(s){return s?{kind:s.kind,repsN:s.repsN||null,repDist:s.repDist||null,title:s.title,sport:s.sport,log:s.log,blocks:s.blocks,tests:s.tests||null,testDist:s.testDist||null,plannedKm:s.plannedKm||null,dureeMin:s.dureeMin}:null;}
 function logFormHtml(){
   const L=S.editLog;
   const ts=toStr(today());
@@ -2176,18 +2448,20 @@ function logFormHtml(){
       ${fNum('l_fcMax','FC maximale (bpm)',r.fcMax,{min:80,max:230,step:1})}
       ${fNum('l_dplus','Dénivelé positif (m)',r.dplus,{min:0,max:5000,step:1})}
       ${fSel('l_fractions','Fractionné réalisé',r.fractions||'na',[['na','Sans objet'],['complet','Complet, allures tenues'],['complet-lent','Complet, allures non tenues'],['partiel','Partiel'],['abandon','Abandonné']])}
+      ${plan&&plan.repsN?`<div class="f wide"><span class="lbl">Temps de chaque ${plan.repDist*1000} m (mm:ss)</span><div class="sets">${Array.from({length:plan.repsN},(_,j)=>`<input type="text" inputmode="numeric" id="l_rep_${j}" aria-label="Répétition ${j+1}" placeholder="R${j+1}" value="${r.reps&&r.reps[j]?fmtTime(r.reps[j]):''}">`).join('')}</div><span class="hint">Laisse vide une répétition non faite. Ces temps recalculent tes allures.</span><span class="errmsg" id="l_rep_e"></span></div>`:''}
       ${plan&&plan.testDist?fTxt('l_chrono',`Chrono officiel du test sur ${fr(plan.testDist)} km`,L&&L.tests&&L.tests.run?fmtTime(L.tests.run.sec):'',{ph:'mm:ss ou h:mm:ss',hint:'Uniquement le temps du test ou de la course, sans échauffement.'}):''}
     </div>`;
   }else if(kind==='sw'){
     const exs=plan?plan.blocks.filter(b=>b.t==='ex'):[];
     const saved=(L&&L.sets)||[];
-    const rows=(exs.length?exs:saved.length?saved.map(x=>({nom:x.nom,series:x.vals.length,cible:x.cible,unite:x.unite,lest:x.lest!=null})):[{nom:'',series:4,cible:'',unite:'reps'}]);
+    const rows=(exs.length?exs:saved.length?saved.map(x=>({nom:x.nom,series:x.vals.length,cible:x.cible,unite:x.unite,lest:x.lest!=null,res:x.res!=null})):[{nom:'',series:4,cible:'',unite:'reps'}]);
     specific=`<div class="stack" id="l_sets">${rows.map((e,i)=>{const sv=saved.find(x=>x.nom===e.nom)||saved[i]||{};const vals=sv.vals||[];
       return `<div class="blk stack" data-ex="${i}">
         ${exs.length?`<div class="row between"><b>${esc(e.nom)}</b><span class="small muted num">Prévu : ${e.series} × ${e.cible}${e.unite==='s'?' s':''}</span></div><input type="hidden" id="l_exnom_${i}" value="${esc(e.nom)}">`
         :`<div class="fields"><div class="f"><label for="l_exnom_${i}">Exercice</label><input type="text" id="l_exnom_${i}" value="${esc(sv.nom||e.nom||'')}" placeholder="Ex. Tractions strictes"></div>${fSel('l_exunit_'+i,'Unité',sv.unite||'reps',[['reps','Répétitions'],['s','Secondes']])}</div>`}
         <div class="sets" role="group" aria-label="Séries réalisées">${Array.from({length:Math.max(e.series,vals.length)},(_,j)=>`<input type="number" min="0" max="500" step="1" id="l_set_${i}_${j}" aria-label="Série ${j+1}" placeholder="S${j+1}${e.cible?' · '+e.cible:''}" value="${vals[j]!=null?esc(vals[j]):''}">`).join('')}<button type="button" class="btn sm" data-addset="${i}">+ série</button></div>
         ${e.lest||sv.lest!=null?fNum('l_lest_'+i,'Lest utilisé (kg)',sv.lest,{min:0,max:100,step:0.5}):''}
+        ${e.res||sv.res!=null?`<div class="f"><span class="lbl">Élastiques accrochés${e.bandsIdx?' (prévu : '+esc(bandsLabel(e.bandsIdx))+')':''}</span>${bandChips('l_bands_'+i,sv.bands||e.bandsIdx||(sv.res?bandsFor(sv.res).idx:[]))}</div>`:''}
         ${(e.band||sv.band)&&bands(S.profile||{}).length?fSel('l_band_'+i,'Élastique utilisé',sv.band!=null?sv.band:(e.band||''),[['','Aucun (sans aide)'],...bands(S.profile).map(b=>[bandName(b),bandName(b)])],{hint:e.band?'Prévu : '+esc(e.band):''}):''}
       </div>`;}).join('')}
       ${exs.length?'':`<button type="button" class="btn sm" data-act="add-ex">Ajouter un exercice</button>`}
@@ -2231,6 +2505,8 @@ function logFormHtml(){
     <p class="errmsg" id="l_global_e"></p>
   </form>`;
 }
+function bandChips(id,sel){sel=sel||[];return `<div class="bandchips" data-target="${id}" role="group" aria-label="Élastiques accrochés">${SW_PACK.map((kg,i)=>`<button type="button" class="chip ${sel.includes(i)?'on':''}" data-bandchip="${i}" aria-pressed="${sel.includes(i)}">${kg} kg</button>`).join('')}<input type="hidden" id="${id}" value="${sel.join(',')}"><b class="num" data-total>${bandsSum(sel)} kg</b></div>`;}
+function readChips(id){const e=document.getElementById(id);if(!e||e.value==='')return [];return e.value.split(',').map(Number).filter(n=>n>=0&&n<SW_PACK.length);}
 function bindLogForm(){
   const f=document.getElementById('logForm');if(!f)return;
   const upd=()=>{const d=num(document.getElementById('l_dist')?.value),t=parseTime(document.getElementById('l_temps')?.value);const pe=document.getElementById('l_pace');if(pe)pe.textContent=d&&t?fmtPace(t/d):'—';};
@@ -2279,6 +2555,8 @@ async function submitLog(){
     const fcm=num(g('l_fcMoy')),fcx=num(g('l_fcMax'));chkRange('l_fcMoy',fcm,60,230,'FC moyenne');chkRange('l_fcMax',fcx,80,230,'FC max');
     if(fcm&&fcx&&fcm>fcx)E('l_fcMax','La FC max doit être supérieure ou égale à la FC moyenne.');
     rec.run={distance:dist,dureeSec:t,fcMoy:fcm,fcMax:fcx,dplus:num(g('l_dplus')),fractions:g('l_fractions')};
+    if(plan&&plan.repsN){const reps=[];for(let j=0;j<plan.repsN;j++){const v=g('l_rep_'+j);if(!v){reps.push(null);continue;}const sec=parseTime(v);const d=plan.repDist||0.8;if(!sec||sec/d<150||sec/d>900){E('l_rep','Temps de répétition invalide (format mm:ss, ex. 4:52).');document.getElementById('l_rep_'+j).classList.add('err');reps.push(null);}else reps.push(sec);}rec.run.reps=reps;
+      if(statut==='realisee'&&reps.every(x=>x==null))E('l_rep','Saisis le temps de tes répétitions : c’est ce qui recalcule tes allures.');}
     if(plan&&plan.testDist&&g('l_chrono')){const c=parseTime(g('l_chrono'));if(!c)E('l_chrono','Format mm:ss ou h:mm:ss.');else{const pace=c/plan.testDist;if(pace<150||pace>900)E('l_chrono',`Allure de ${fmtPace(pace)} incohérente.`);else rec.tests={run:{dist:plan.testDist,sec:c}};}}
     if(t&&rec.dureeMin&&t/60>rec.dureeMin+1)E('l_duree','La durée totale ne peut pas être inférieure à la durée de course.');
   }else if(kind==='sw'){
@@ -2287,8 +2565,9 @@ async function submitLog(){
       const pe=plan?plan.blocks.filter(b=>b.t==='ex')[i]:null;const unite=pe?pe.unite:(document.getElementById('l_exunit_'+i)||{}).value||'reps';
       const vals=[...div.querySelectorAll('.sets input')].map(x=>{const n=num(x.value);if(x.value!==''&&(n==null||n<0||n>500)){x.classList.add('err');bad=true;}return x.value===''?null:n;});
       const lestEl=document.getElementById('l_lest_'+i);const lest=lestEl?num(lestEl.value):null;
+      const hasChips=!!document.getElementById('l_bands_'+i);const bandsSel=hasChips?readChips('l_bands_'+i):null;const res=hasChips?(bandsSel.length?bandsSum(bandsSel):null):null;
       const bandEl=document.getElementById('l_band_'+i);const band=bandEl?bandEl.value:null;
-      if(nom||vals.some(v=>v!=null))sets.push({nom:nom||'Exercice',unite,cible:pe?pe.cible:null,vals,lest,band});
+      if(nom||vals.some(v=>v!=null))sets.push({nom:nom||'Exercice',unite,cible:pe?pe.cible:null,vals,lest,band,res,bands:bandsSel});
       if(!nom&&vals.some(v=>v!=null)&&!pe){setErr('l_exnom_'+i,'');document.getElementById('l_exnom_'+i).classList.add('err');bad=true;}
     });
     if(statut==='realisee'&&!sets.some(s=>s.vals.some(v=>v!=null)))E('l_global','Saisis au moins une série réalisée, ou passe le statut en « Annulée ».');
@@ -2315,9 +2594,9 @@ async function submitLog(){
 function demoProfile(){
   const t=today(),st=addDays(mondayOf(t),-42);
   return {prenom:'Alex (exemple)',age:31,sexe:'H',taille:180,poids:78,fcRepos:54,fcMax:190,sommeil:7,stress:'3',metier:'sedentaire',blessures:['epaule'],blessureDetail:'',douleur:0,medical:'non',
-    debut:toStr(st),jours:['lun','mar','jeu','sam','dim'],seancesMax:7,dureeMax:75,dureeWE:120,creneau:'soir',doubles:true,materiel:['barre','paralleles','elastiques','lest'],elastiques:[{id:'bj',nom:'Jaune',min:2,max:7},{id:'br',nom:'Rouge',min:7,max:16},{id:'bn',nom:'Noir',min:11,max:23},{id:'bv',nom:'Violet',min:16,max:36}],trAssBand:'bn',trAssReps:'14',elasUsage:['tractions','dips','muscleup','frontlever','planche','echauffement'],
+    debut:toStr(st),jours:['lun','mar','jeu','sam','dim'],seancesMax:7,dureeMax:75,dureeWE:120,creneau:'soir',doubles:true,materiel:['barre','paralleles','elastiques','lest','smartworkout'],elastiques:[{id:'bj',nom:'Jaune',min:2,max:7},{id:'br',nom:'Rouge',min:7,max:16},{id:'bn',nom:'Noir',min:11,max:23},{id:'bv',nom:'Violet',min:16,max:36}],trAssBand:'bn',trAssReps:'14',elasUsage:['tractions','dips','muscleup','frontlever','planche','echauffement'],
     swAnc:'2-5',tractions:11,dips:18,pompes:35,muscleup:0,fl:1,planche:0,handstandMur:30,handstand:3,lsit:10,pistol:'aide',
-    runAnc:'2-5',kmSemaine:18,runSeances:2,sortieLongue:10,refDist:'5',refTemps:'24:30',refAge:'1',
+    runAnc:'2-5',kmSemaine:18,runSeances:2,sortieLongue:10,ref5:'24:30',refAge:'1',semaine:JSON.parse(JSON.stringify(DEFAULT_WEEK)),
     vNiveau:'departemental',vPoste:'attaquant',vClubJours:['mer'],vDuree:120,vMatchJours:[],vDetente:52,
     objectifs:[{id:'d1',type:'run10',cible:'49:30',date:toStr(addDays(t,63)),priorite:'principal'},{id:'d2',type:'pullups',cible:'16',date:toStr(addDays(t,90)),priorite:'secondaire'},{id:'d3',type:'jump',cible:'58',date:toStr(addDays(t,120)),priorite:'secondaire'}],
     savedAt:new Date(st).toISOString()};
@@ -2330,9 +2609,10 @@ function demoLogs(p){
     const skip=rnd()<0.1;const id='demo'+logs.length;
     const base={id,createdAt:Date.now(),date:s.date,plannedId:s.id,plan:planSnapshot(s),sport:s.sport,title:s.title,statut:skip?'annulee':'realisee',dureeMin:s.dureeMin,rpe:skip?null:clamp(Math.round((s.intensite==='Facile'?4:s.intensite==='Modérée'?6:7.5)+rnd()*1.5-0.5),1,10),sommeil:Math.round((6.5+rnd()*1.5)*2)/2,forme:String(clamp(Math.round(3+rnd()*1.6-0.5),1,5)),douleur:0,douleurZone:'',poids:rnd()<0.3?Math.round((78-w.index*0.1+rnd()*0.4)*10)/10:null,notes:''};
     if(!skip){
-      if(s.log==='run'){const km=s.plannedKm||6;const pace=prog.A.efPace*(s.intensite==='Facile'?1:0.88);base.run={distance:km,dureeSec:Math.round(km*pace),fcMoy:140+Math.round(rnd()*15),fcMax:165+Math.round(rnd()*15),dplus:Math.round(rnd()*60),fractions:s.intensite==='Facile'?'na':'complet'};
+      if(s.log==='run'&&s.repsN){const km=s.plannedKm;const p5=runFitness(p,logs,s.date).p5;base.rpe=7;base.run={distance:km,dureeSec:Math.round(km*p5*1.15),fcMoy:150,fcMax:178,dplus:20,fractions:'complet',reps:Array.from({length:s.repsN},()=>Math.round(p5*s.repDist*(0.975+rnd()*0.02)))};}
+      else if(s.log==='run'){const km=s.plannedKm||6;const pace=prog.A.efPace*(s.intensite==='Facile'?1:0.88);base.run={distance:km,dureeSec:Math.round(km*pace),fcMoy:140+Math.round(rnd()*15),fcMax:165+Math.round(rnd()*15),dplus:Math.round(rnd()*60),fractions:s.intensite==='Facile'?'na':'complet'};
         if(s.testDist){run5-=25+rnd()*15;base.tests={run:{dist:s.testDist,sec:Math.round(s.testDist===5?run5:riegel(run5,5,s.testDist))}};}}
-      else if(s.log==='sw'){base.sets=s.blocks.filter(b=>b.t==='ex').map(b=>({nom:b.nom,unite:b.unite,cible:b.cible,vals:Array.from({length:b.series},()=>Math.max(1,b.cible-(rnd()<0.3?1:0))),lest:b.lest?7.5:null}));}
+      else if(s.log==='sw'){base.rpe=7;base.sets=s.blocks.filter(b=>b.t==='ex').map(b=>({nom:b.nom,unite:b.unite,cible:b.cible,res:b.resKg||null,bands:b.bandsIdx||null,vals:Array.from({length:b.series},()=>b.hi&&rnd()<0.5?b.hi:Math.max(1,b.cible-(rnd()<0.3?1:0))),lest:b.lest?7.5:null}));}
       else if(s.log==='volley'){base.volley={type:'entrainement',sauts:60+Math.round(rnd()*40),resultat:''};}
       else if(s.log==='test'){base.tests={};for(const k of s.tests){if(k==='pullups'){pu+=1;base.tests.pullups=pu;}else if(k==='dips'){dp+=2;base.tests.dips=dp;}else if(k==='jump'){jp+=1.5;base.tests.jump=jp;}}}
     }
@@ -2393,6 +2673,7 @@ async function onClick(e){
   if(ds.light){const X=getExtra();X.light=Object.assign({},X.light,{[ds.light]:true});closeModal();await saveExtra(X);toast('Version allégée appliquée à la séance du jour.');render();return;}
   if(ds.unlight){const X=getExtra();X.light=Object.assign({},X.light);delete X.light[ds.unlight];closeModal();await saveExtra(X);toast('Séance prévue rétablie.');render();return;}
   if(ds.export){b.disabled=true;await doExport(ds.export);b.disabled=false;return;}
+  if(ds.bandchip!=null){const box=b.closest('.bandchips');b.classList.toggle('on');b.setAttribute('aria-pressed',b.classList.contains('on'));const sel=[...box.querySelectorAll('.chip.on')].map(x=>+x.dataset.bandchip);box.querySelector('input').value=sel.join(',');box.querySelector('[data-total]').textContent=bandsSum(sel)+' kg';return;}
   if(ds.addset!=null){const div=document.querySelector(`[data-ex="${ds.addset}"] .sets`);const n=div.querySelectorAll('input').length;const inp=document.createElement('input');inp.type='number';inp.min='0';inp.max='500';inp.step='1';inp.id=`l_set_${ds.addset}_${n}`;inp.setAttribute('aria-label','Série '+(n+1));inp.placeholder='S'+(n+1);div.insertBefore(inp,b);inp.focus();return;}
   switch(ds.act){
     case 'close':closeModal();break;
