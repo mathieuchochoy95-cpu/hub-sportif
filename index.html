@@ -1702,10 +1702,22 @@ function goalProgress(g,p,logs,A){
   // 1) Résultats
   if(def.kind==='time'){
     const ini=initialP5(p);const i0=riegel(ini.p5*5,5,def.dist);
-    let cur=pts.length?pts[pts.length-1].y:null,src=pts.length>1?'chrono de test':'';
-    if(templateMode(p)){const fit=runFitness(p,logs,'9999-12-31');const est=riegel(fit.p5*5,5,def.dist);if(cur==null||est<cur){cur=est;src='estimé d’après tes fractionnés';R.est=true;}}
-    R.initial=pts.length?pts[0].y:i0;R.current=cur;R.src=src||'questionnaire';
+    // Seul un chrono réalisé sur la distance de l'objectif (à 3 % près) est un vrai résultat.
+    // Un chrono sur 5 ou 10 km converti en temps de semi reste une projection.
+    const real=logs.filter(l=>l.statut!=='annulee'&&l.tests&&l.tests.run&&+l.tests.run.sec&&Math.abs(+l.tests.run.dist-def.dist)/def.dist<=0.03)
+      .map(l=>({d:l.date,y:riegel(+l.tests.run.sec,+l.tests.run.dist,def.dist)})).sort((a,b)=>a.d<b.d?-1:1);
+    let cur=pts.length?pts[pts.length-1].y:null,src=pts.length>1?'projection d’après ton chrono de test':'projection d’après ton chrono du questionnaire';
+    if(templateMode(p)){const fit=runFitness(p,logs,'9999-12-31');const est=riegel(fit.p5*5,5,def.dist);if(cur==null||est<cur){cur=est;src='projection d’après tes fractionnés';}}
+    if(real.length){const best=Math.min(...real.map(x=>x.y));if(cur==null||best<=cur){cur=best;src='chrono réalisé sur '+fr(def.dist)+' km';}else R.est=true;}else R.est=true;
+    R.initial=pts.length?pts[0].y:i0;R.current=cur;R.src=src;
     if(R.initial!=null&&R.current!=null&&F.target)R.pct=R.initial<=F.target?100:clamp((R.initial-R.current)/(R.initial-F.target)*100,0,100);
+    // Au-delà de 10 km, la vitesse ne suffit pas : tant que l'endurance n'est pas construite, la barre est limitée par ta plus longue sortie.
+    if(R.pct!=null&&def.dist>10&&!real.length){
+      const longest=Math.max(num(p.sortieLongue)||0,...logs.filter(l=>l.statut!=='annulee'&&l.sport==='course'&&l.run).map(l=>num(l.run.distance)||0));
+      const need=def.long||def.dist*0.9,cap=Math.round(clamp(longest/need,0,1)*95);
+      R.longest=longest;R.need=need;
+      if(cap<R.pct){R.pct=cap;R.endCap=true;R.src=`limité par ta plus longue sortie : ${fr(longest)} km sur ${fr(need)} km visés`;}
+    }
   }else if(['reps','sec','stage','cm','kg','finish','volume'].includes(def.kind)){
     if(pts.length){R.initial=pts[0].y;R.current=pts[pts.length-1].y;R.src=pts.length>1?pts[pts.length-1].src:'questionnaire';}
     // Tractions, dips, pompes : estimation du maximum d'après les séances, si plus récente que le dernier test
@@ -1738,7 +1750,7 @@ function progressBlock(g,R,big){
   const pct=R.pct==null?null:Math.round(R.pct);
   return `<div class="stack" style="gap:8px">
     <div class="row between"><span class="eyebrow">Résultats</span>${R.status?`<span class="pill ${R.status[0]}">${R.status[1]}</span>`:''}</div>
-    <div class="row between" style="align-items:baseline"><div class="kpi"><div class="v" style="${big?'':'font-size:1.9rem'}">${pct==null?'—':pct}<small> %</small></div></div><span class="small muted" style="text-align:right">${R.current!=null?`Actuel : <b style="color:var(--ink)">${fmtGoalV(g,R.current)}</b><br>${esc(R.src)}`:'Pas encore de mesure'}</span></div>
+    <div class="row between" style="align-items:baseline"><div class="kpi"><div class="v" style="${big?'':'font-size:1.9rem'}">${pct==null?'—':pct}<small> %</small></div></div><span class="small muted" style="text-align:right">${R.current!=null?`${R.est&&g.def.kind==='time'?'Projection':'Actuel'} : <b style="color:var(--ink)">${fmtGoalV(g,R.current)}</b><br>${esc(R.src)}`:'Pas encore de mesure'}</span></div>
     <div class="bar" style="height:${big?16:12}px;position:relative" role="img" aria-label="${pct==null?'Pas de mesure':pct+' % du chemin vers l’objectif'}"><i style="width:${pct||0}%;${R.status&&R.status[0]==='ok'?'background:var(--ok)':R.status&&R.status[0]==='bad'?'background:var(--bad)':R.status&&R.status[0]==='warn'?'background:var(--warn)':''}"></i>${R.expected!=null&&R.expected<100?`<span title="Où tu devrais en être aujourd’hui" style="position:absolute;top:-3px;bottom:-3px;left:${R.expected}%;width:2px;background:var(--ink)"></span>`:''}</div>
     <div class="row between tiny muted"><span>Départ : ${fmtGoalV(g,R.initial)}</span><span>Repère : ${R.expected} % aujourd’hui</span><span>Cible : ${esc(goalTargetLabel(g))}</span></div>
     ${R.prep&&R.prep.total?`<div class="row between small" style="margin-top:4px"><span class="muted">Séances ${esc(SPORT_LABEL[g.def.sport]||'')} faites</span><b class="num">${R.prep.done} / ${R.prep.past}${R.prep.pct!=null?` (${R.prep.pct} %)`:''}</b></div>
@@ -1754,6 +1766,7 @@ function mainGoalCard(goals,p){
   let advice='';
   if(R.pct==null)advice='Fais un premier test ou un premier fractionné pour mesurer ton point de départ.';
   else if(R.pct>=100)advice='Objectif atteint. Tu peux viser plus haut dans le questionnaire.';
+  else if(R.endCap)advice=`Ta vitesse sur 5 ou 10 km permettrait le chrono visé, mais tu n’as jamais couru plus de ${fr(R.longest)} km. Sur ${fr(g.def.dist)} km, c’est l’endurance qui décide : la barre avancera avec ta sortie longue, jusqu’à ${fr(R.need)} km.`;
   else if(R.confirm)advice='D’après tes séances, tu as probablement déjà le niveau. Seul un test le prouvera : fais-le lors de la prochaine semaine allégée.';
   else if(R.status[0]==='ok')advice='Continue comme ça : tes résultats avancent au moins aussi vite que le temps qui passe.';
   else if(R.prep&&R.prep.pct!=null&&R.prep.pct<80)advice=`Ton retard vient surtout des séances manquées (${R.prep.pct} % faites). C’est le premier levier à corriger.`;
@@ -1764,6 +1777,7 @@ function mainGoalCard(goals,p){
     <p class="small">${esc(advice)}</p>
     <details><summary class="small">Comment ces pourcentages sont calculés</summary><div class="stack small" style="margin-top:6px">
       <p><b>Résultats :</b> le chemin parcouru entre ton niveau de départ et ta cible. Exemple : départ à 10 tractions, cible 15, actuel 12, soit 40 %. En course, le temps est estimé sur la distance de l’objectif à partir de ton allure actuelle, recalculée à chaque fractionné, ou de ton dernier chrono de test. Pour les tractions, dips et pompes, entre deux tests, le maximum est estimé à partir de ta meilleure série (répétitions ÷ 0,75) : c’est une estimation, le test de la semaine allégée fait foi. Tant que le résultat n’est qu’estimé, la barre s’arrête à 95 % : seul un vrai test peut afficher 100 %.</p>
+      <p><b>Courses de plus de 10 km :</b> ton chrono sur 5 ou 10 km converti en temps de semi ou de marathon n’est qu’une projection, et elle est optimiste si tu n’as pas l’endurance. Tant que tu n’as pas couru la distance, la barre ne peut pas dépasser ta plus longue sortie rapportée à la sortie longue visée en fin de préparation (par exemple 10 km sur 20 km, soit 48 %). Seul un vrai chrono sur la distance affiche 100 %.</p>
       <p><b>Séances :</b> les séances du sport concerné faites, sur celles déjà passées depuis le début du programme. Une séance annulée compte comme non faite.</p>
       <p><b>Repère (trait noir) :</b> où tu devrais en être aujourd’hui si tu progressais régulièrement jusqu’au jour J. En pratique, on progresse plus vite au début : être un peu au-dessus du repère est normal, être nettement en dessous est un signal d’alerte.</p>
     </div></details>
