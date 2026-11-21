@@ -1641,6 +1641,7 @@ function renderDashboard(){
   </section>
   ${S.live?`<div class="notice ok"><div class="row between"><p><b>Séance en cours :</b> ${esc(S.live.title)}</p><div class="row"><button class="btn sm primary" data-live="resume">Reprendre</button><button class="btn sm danger" data-live="abandon">Abandonner</button></div></div></div>`:''}
   ${[...A.warnings.filter(w=>w.lvl==='bad'),...alerts].map(a=>`<div class="notice ${a.lvl}"><p>${a.txt}</p></div>`).join('')}
+  ${mainGoalCard(goals,p)}
   <section class="grid g4">
     <div class="card kpi"><span class="eyebrow">Cette semaine</span><div class="v">${wkDone}<small> / ${wkSess.length} séances</small></div><div class="bar" style="margin-top:10px"><i style="width:${wkSess.length?Math.round(wkDone/wkSess.length*100):0}%"></i></div></div>
     <div class="card kpi s-course"><span class="eyebrow">Course cette semaine</span><div class="v">${fr(kmDone)}<small> / ${fr(kmPlan)} km</small></div><div class="bar" style="margin-top:10px"><i style="width:${kmPlan?clamp(Math.round(kmDone/kmPlan*100),0,100):0}%;background:var(--run)"></i></div></div>
@@ -1692,22 +1693,90 @@ function sessionLine(s){
     <div class="row"><button class="btn sm" data-sess="${s.id}">Détail</button>${canMove?`<button class="btn sm" data-move="${s.id}">Je ne peux pas</button>`:''}${(st==='todo'||st==='late')&&s.log==='sw'?`<button class="btn sm primary" data-live-start="${s.id}">Démarrer</button>`:''}${st==='todo'||st==='late'?`<button class="btn sm ${s.log==='sw'?'':'primary'}" data-log="${s.id}">Saisir</button>`:`<span class="pill ${st==='done'?'ok':st==='part'?'warn':'bad'}">${STATUS_TXT[st]}</span>`}</div>
   </div>${fatigueBanner(s)}`;
 }
+/* ---- Avancement vers un objectif : résultats mesurés + séances réalisées ---- */
+const GOAL_SPORT_FILTER={course:s=>s.sport==='course',sw:s=>s.sport==='sw',volley:s=>s.sport==='volley',general:s=>true};
+function goalProgress(g,p,logs,A){
+  const def=g.def,F=g.feas,R={pct:null,current:null,initial:null,target:F.target,src:'',expected:null,prep:null,status:null};
+  if(def.kind==='event')return R;
+  const pts=goalSeries(g,p,logs,A);
+  // 1) Résultats
+  if(def.kind==='time'){
+    const ini=initialP5(p);const i0=riegel(ini.p5*5,5,def.dist);
+    let cur=pts.length?pts[pts.length-1].y:null,src=pts.length>1?'chrono de test':'';
+    if(templateMode(p)){const fit=runFitness(p,logs,'9999-12-31');const est=riegel(fit.p5*5,5,def.dist);if(cur==null||est<cur){cur=est;src='estimé d’après tes fractionnés';R.est=true;}}
+    R.initial=pts.length?pts[0].y:i0;R.current=cur;R.src=src||'questionnaire';
+    if(R.initial!=null&&R.current!=null&&F.target)R.pct=R.initial<=F.target?100:clamp((R.initial-R.current)/(R.initial-F.target)*100,0,100);
+  }else if(['reps','sec','stage','cm','kg','finish','volume'].includes(def.kind)){
+    if(pts.length){R.initial=pts[0].y;R.current=pts[pts.length-1].y;R.src=pts.length>1?pts[pts.length-1].src:'questionnaire';}
+    // Tractions, dips, pompes : estimation du maximum d'après les séances, si plus récente que le dernier test
+    const key={pullups:/^Tractions strictes/,dips:/^Dips stricts/,pushups:/^Pompes strictes/}[g.type];
+    if(key){const lastTest=pts.length?pts[pts.length-1].x:0;
+      const L=logs.filter(l=>l.statut!=='annulee'&&+parseDate(l.date)>lastTest&&(l.sets||[]).some(s=>key.test(s.nom))).sort((a,b)=>a.date<b.date?1:-1)[0];
+      if(L){const s=L.sets.find(x=>key.test(x.nom));const best=Math.max(0,...s.vals.filter(v=>v!=null));const est=Math.round(best/0.75);if(best&&(R.current==null||est>R.current)){R.current=est;R.src='estimé d’après ta séance du '+fmtDate(parseDate(L.date));R.est=true;}}}
+    if(R.initial!=null&&R.current!=null&&F.target!=null){
+      if(def.kind==='kg')R.pct=R.initial===F.target?100:clamp(Math.abs(R.initial-R.current)/Math.abs(R.initial-F.target)*100*(Math.sign(F.target-R.initial)===Math.sign(R.current-R.initial)?1:0),0,100);
+      else R.pct=R.initial>=F.target?100:clamp((R.current-R.initial)/(F.target-R.initial)*100,0,100);
+    }
+  }
+  // 2) Séances de préparation (sport de l'objectif) depuis le début du programme jusqu'au jour J
+  const P=S.program,ts=toStr(today()),gd=toStr(g.dateObj),filt=GOAL_SPORT_FILTER[def.sport]||(s=>true);
+  if(P){const all=P.weeks.flatMap(w=>w.sessions).filter(s=>filt(s)&&s.date<=gd);
+    const past=all.filter(s=>s.date<ts||(s.date===ts&&logFor(s.id)));
+    const done=past.filter(s=>{const l=logFor(s.id);return l&&l.statut!=='annulee';});
+    R.prep={done:done.length,past:past.length,total:all.length,pct:past.length?Math.round(done.length/past.length*100):null};}
+  // 3) Où tu devrais en être aujourd'hui (trajectoire linéaire entre le début et le jour J)
+  const st=P?P.start:A.start;const tot=daysBetween(st,g.dateObj),el=clamp(daysBetween(st,today()),0,tot);
+  R.expected=tot>0?Math.round(el/tot*100):100;
+  // Une estimation ne vaut pas un test : plafonnée à 95 %, l'objectif n'est « atteint » que sur un vrai test.
+  if(R.est&&R.pct!=null&&R.pct>95){R.pct=95;R.confirm=true;}
+  if(R.pct!=null){const d=R.pct-R.expected;R.status=R.pct>=100?['ok','Objectif atteint']:R.confirm?['ok','À confirmer par un test']:d>=-5?['ok','Dans les temps']:d>=-20?['warn','Léger retard']:['bad','En retard'];}
+  return R;
+}
+function fmtGoalV(g,v){if(v==null)return '—';if(g.def.kind==='time')return fmtTime(v);if(g.def.kind==='stage')return g.def.stages[Math.round(v)]||'—';return fr(v)+' '+(g.def.unit||'');}
+function progressBlock(g,R,big){
+  if(g.def.kind==='event')return '<p class="small muted">Objectif de forme le jour J : pas de mesure chiffrée.</p>';
+  const pct=R.pct==null?null:Math.round(R.pct);
+  return `<div class="stack" style="gap:8px">
+    <div class="row between"><span class="eyebrow">Résultats</span>${R.status?`<span class="pill ${R.status[0]}">${R.status[1]}</span>`:''}</div>
+    <div class="row between" style="align-items:baseline"><div class="kpi"><div class="v" style="${big?'':'font-size:1.9rem'}">${pct==null?'—':pct}<small> %</small></div></div><span class="small muted" style="text-align:right">${R.current!=null?`Actuel : <b style="color:var(--ink)">${fmtGoalV(g,R.current)}</b><br>${esc(R.src)}`:'Pas encore de mesure'}</span></div>
+    <div class="bar" style="height:${big?16:12}px;position:relative" role="img" aria-label="${pct==null?'Pas de mesure':pct+' % du chemin vers l’objectif'}"><i style="width:${pct||0}%;${R.status&&R.status[0]==='ok'?'background:var(--ok)':R.status&&R.status[0]==='bad'?'background:var(--bad)':R.status&&R.status[0]==='warn'?'background:var(--warn)':''}"></i>${R.expected!=null&&R.expected<100?`<span title="Où tu devrais en être aujourd’hui" style="position:absolute;top:-3px;bottom:-3px;left:${R.expected}%;width:2px;background:var(--ink)"></span>`:''}</div>
+    <div class="row between tiny muted"><span>Départ : ${fmtGoalV(g,R.initial)}</span><span>Repère : ${R.expected} % aujourd’hui</span><span>Cible : ${esc(goalTargetLabel(g))}</span></div>
+    ${R.prep&&R.prep.total?`<div class="row between small" style="margin-top:4px"><span class="muted">Séances ${esc(SPORT_LABEL[g.def.sport]||'')} faites</span><b class="num">${R.prep.done} / ${R.prep.past}${R.prep.pct!=null?` (${R.prep.pct} %)`:''}</b></div>
+      <div class="bar"><i style="width:${R.prep.past?R.prep.done/R.prep.past*100:0}%;background:var(--c,var(--accent))"></i></div>
+      <span class="tiny muted">${R.prep.total-R.prep.past} séance${R.prep.total-R.prep.past>1?'s':''} restante${R.prep.total-R.prep.past>1?'s':''} d’ici le jour J.</span>`:''}
+  </div>`;
+}
+function goalTitle(g){const l=g.def.label;return /…/.test(l)?l.replace('…',' '+goalTargetLabel(g)).replace(/ \(km\)$/,''):l.replace(/ \(.*\)$/,'')+' : '+goalTargetLabel(g);}
+function mainGoalCard(goals,p){
+  const g=goals.filter(x=>x.def.kind!=='event').sort((a,b)=>(b.priorite==='principal')-(a.priorite==='principal')||a.dateObj-b.dateObj)[0];
+  if(!g)return '';
+  const R=goalProgress(g,p,S.logs,S.program.A),days=daysBetween(today(),g.dateObj);
+  let advice='';
+  if(R.pct==null)advice='Fais un premier test ou un premier fractionné pour mesurer ton point de départ.';
+  else if(R.pct>=100)advice='Objectif atteint. Tu peux viser plus haut dans le questionnaire.';
+  else if(R.confirm)advice='D’après tes séances, tu as probablement déjà le niveau. Seul un test le prouvera : fais-le lors de la prochaine semaine allégée.';
+  else if(R.status[0]==='ok')advice='Continue comme ça : tes résultats avancent au moins aussi vite que le temps qui passe.';
+  else if(R.prep&&R.prep.pct!=null&&R.prep.pct<80)advice=`Ton retard vient surtout des séances manquées (${R.prep.pct} % faites). C’est le premier levier à corriger.`;
+  else advice='Tu fais tes séances, mais les résultats suivent moins vite que prévu : regarde ton sommeil et ta récupération, ou décale la date de l’objectif.';
+  return `<section class="card stack s-${g.def.sport}" style="border-left:5px solid var(--c)">
+    <div class="row between"><div><span class="eyebrow">Objectif ${g.priorite==='principal'?'principal':'le plus proche'}</span><h3>${esc(goalTitle(g))}</h3></div><span class="num"><b>${days>=0?'J-'+days:'Passé'}</b> · ${fmtDateY(g.dateObj)}</span></div>
+    ${progressBlock(g,R,true)}
+    <p class="small">${esc(advice)}</p>
+    <details><summary class="small">Comment ces pourcentages sont calculés</summary><div class="stack small" style="margin-top:6px">
+      <p><b>Résultats :</b> le chemin parcouru entre ton niveau de départ et ta cible. Exemple : départ à 10 tractions, cible 15, actuel 12, soit 40 %. En course, le temps est estimé sur la distance de l’objectif à partir de ton allure actuelle, recalculée à chaque fractionné, ou de ton dernier chrono de test. Pour les tractions, dips et pompes, entre deux tests, le maximum est estimé à partir de ta meilleure série (répétitions ÷ 0,75) : c’est une estimation, le test de la semaine allégée fait foi. Tant que le résultat n’est qu’estimé, la barre s’arrête à 95 % : seul un vrai test peut afficher 100 %.</p>
+      <p><b>Séances :</b> les séances du sport concerné faites, sur celles déjà passées depuis le début du programme. Une séance annulée compte comme non faite.</p>
+      <p><b>Repère (trait noir) :</b> où tu devrais en être aujourd’hui si tu progressais régulièrement jusqu’au jour J. En pratique, on progresse plus vite au début : être un peu au-dessus du repère est normal, être nettement en dessous est un signal d’alerte.</p>
+    </div></details>
+  </section>`;
+}
 function goalCard(g,p){
   const F=g.feas,days=daysBetween(today(),g.dateObj);
-  const pts=goalSeries(g,p,S.logs,S.program.A);
-  let progress=null,last=null;
-  if(pts.length&&F.target!=null&&g.def.kind!=='event'){
-    last=pts[pts.length-1].y;const first=pts[0].y;
-    if(g.def.kind==='time')progress=first===F.target?100:clamp((first-last)/(first-F.target)*100,0,100);
-    else progress=first===F.target?100:clamp((last-first)/(F.target-first)*100,0,100);
-    if(g.def.kind==='kg')progress=first===F.target?100:clamp((Math.abs(first-last))/Math.abs(first-F.target)*100,0,100);
-  }
-  const fmtV=v=>{if(v==null)return '—';if(g.def.kind==='time')return fmtTime(v);if(g.def.kind==='stage')return g.def.stages[Math.round(v)]||'—';return fr(v)+' '+(g.def.unit||'');};
+  const R=goalProgress(g,p,S.logs,S.program.A);
   return `<div class="card stack s-${g.def.sport}" style="border-top:4px solid var(--c)">
     <div class="row between">${sportTag(g.def.sport)}${verdictPill(F.verdict)}</div>
     <div><b>${esc(g.def.label.replace('…',''))}</b> <span class="muted">→</span> <b>${esc(goalTargetLabel(g))}</b></div>
     <div class="row between small"><span class="muted">${fmtDateY(g.dateObj)}${g.priorite==='principal'?' · principal':''}</span><span class="num"><b>${days>=0?'J-'+days:'Passé'}</b></span></div>
-    ${progress!=null?`<div><div class="row between small"><span class="muted">Actuel : <b style="color:var(--ink)">${fmtV(last)}</b></span><span class="num">${Math.round(progress)} %</span></div><div class="bar"><i style="width:${progress}%"></i></div></div>`:''}
+    ${progressBlock(g,R,false)}
     ${F.realTarget&&(F.verdict==='no'||F.verdict==='hard')?`<p class="small">Cible réaliste à cette date : <b>${esc(F.realTarget)}</b></p>`:''}
   </div>`;
 }
