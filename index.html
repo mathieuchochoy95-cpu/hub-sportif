@@ -24,7 +24,7 @@
 :root{
   --bg:#EEF1F4; --surface:#FFFFFF; --surface-2:#F6F8FA; --ink:#121820; --muted:#5A6573; --line:#D9DFE6;
   --accent:#1F4FD1; --accent-ink:#FFFFFF; --band:#121A26; --band-ink:#F2F5F9;
-  --run:#D9432A; --sw:#0E8574; --volley:#D69C00; --gen:#1F4FD1;
+  --run:#D9432A; --sw:#0E8574; --volley:#D69C00; --gen:#1F4FD1; --climb:#7A4BC8;
   --ok:#1A7F48; --warn:#B9740B; --bad:#C2302A; --ok-bg:#E3F3EA; --warn-bg:#FBF0DC; --bad-bg:#FAE3E1;
   --font-display:"Barlow Condensed","Arial Narrow",Arial,sans-serif;
   --font-body:"Barlow","Segoe UI",Roboto,Arial,sans-serif;
@@ -34,7 +34,7 @@
   :root:not([data-theme="light"]){
     --bg:#0E131A; --surface:#161D27; --surface-2:#1C2531; --ink:#E8EDF3; --muted:#97A3B2; --line:#2A3542;
     --accent:#6E93FF; --accent-ink:#0B1220; --band:#0A0F15; --band-ink:#E8EDF3;
-    --run:#FF6A4D; --sw:#2DC2A8; --volley:#F2BE2E; --gen:#6E93FF;
+    --run:#FF6A4D; --sw:#2DC2A8; --volley:#F2BE2E; --gen:#6E93FF; --climb:#B293F2;
     --ok:#4CC27F; --warn:#E9A53A; --bad:#FF6B63; --ok-bg:#15301F; --warn-bg:#33270F; --bad-bg:#3A1A18;
     color-scheme:dark;
   }
@@ -42,7 +42,7 @@
 :root[data-theme="dark"]{
   --bg:#0E131A; --surface:#161D27; --surface-2:#1C2531; --ink:#E8EDF3; --muted:#97A3B2; --line:#2A3542;
   --accent:#6E93FF; --accent-ink:#0B1220; --band:#0A0F15; --band-ink:#E8EDF3;
-  --run:#FF6A4D; --sw:#2DC2A8; --volley:#F2BE2E; --gen:#6E93FF;
+  --run:#FF6A4D; --sw:#2DC2A8; --volley:#F2BE2E; --gen:#6E93FF; --climb:#B293F2;
   --ok:#4CC27F; --warn:#E9A53A; --bad:#FF6B63; --ok-bg:#15301F; --warn-bg:#33270F; --bad-bg:#3A1A18;
   color-scheme:dark;
 }
@@ -111,7 +111,7 @@ main{max-width:1180px;margin:0 auto;padding:20px 16px 60px;display:grid;gap:18px
 .pill.info{background:var(--surface-2);color:var(--muted);border:1px solid var(--line)}
 .tag{display:inline-flex;align-items:center;gap:6px;font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
 .tag::before{content:"";width:10px;height:10px;border-radius:2px;background:var(--c,var(--gen));transform:skewX(-14deg)}
-.s-course{--c:var(--run)} .s-sw{--c:var(--sw)} .s-volley{--c:var(--volley)} .s-general{--c:var(--gen)}
+.s-course{--c:var(--run)} .s-sw{--c:var(--sw)} .s-volley{--c:var(--volley)} .s-escalade{--c:var(--climb)} .s-general{--c:var(--gen)}
 
 .notice{border-left:4px solid var(--c,var(--accent));background:var(--surface);border-radius:8px;padding:12px 14px;border-top:1px solid var(--line);border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
 .notice.warn{--c:var(--warn)} .notice.bad{--c:var(--bad)} .notice.ok{--c:var(--ok)}
@@ -226,9 +226,9 @@ details summary{cursor:pointer;font-weight:600}
 <header class="top">
   <div class="top-in">
     <div class="brand">
-      <span class="stripes" aria-hidden="true"><i style="background:var(--run)"></i><i style="background:var(--sw)"></i><i style="background:var(--volley)"></i></span>
+      <span class="stripes" aria-hidden="true"><i style="background:var(--run)"></i><i style="background:var(--sw)"></i><i style="background:var(--volley)"></i><i style="background:var(--climb)"></i></span>
       <h1>Hub sportif</h1>
-      <small>Street workout · Volley · Course à pied</small>
+      <small>Street workout · Escalade · Volley · Course à pied</small>
     </div>
     <span id="sync" class="sync">Chargement…</span>
   </div>
@@ -241,7 +241,7 @@ details summary{cursor:pointer;font-weight:600}
   </nav>
 </header>
 <main id="app"></main>
-<p class="tiny muted" style="text-align:center;padding:8px 16px 28px">Version du 22 nov. 2026 · n° 4</p>
+<p class="tiny muted" style="text-align:center;padding:8px 16px 28px">Version du 28 nov. 2026 · n° 5</p>
 <div id="modal" role="dialog" aria-modal="true"><div class="modal-box" id="modalBox"></div></div>
 <div id="toast" role="status" aria-live="polite"></div>
 <div id="live" role="dialog" aria-modal="true" aria-label="Séance en cours" hidden></div>
@@ -289,7 +289,7 @@ function riegel(t1,d1,d2){return t1*Math.pow(d2/d1,1.06);}
    ========================================================================== */
 const FL_STAGES=['Aucun','Tuck','Advanced tuck','Une jambe tendue','Straddle','Complet'];
 const PL_STAGES=['Aucun','Planche lean','Tuck','Advanced tuck','Straddle','Complète'];
-const SPORT_LABEL={course:'Course à pied',sw:'Street workout',volley:'Volley',general:'Général'};
+const SPORT_LABEL={course:'Course à pied',sw:'Street workout',volley:'Volley',escalade:'Escalade',general:'Général'};
 const GOALS={
   run5:{sport:'course',kind:'time',label:'Courir 5 km en…',dist:5,taper:1,peak:25,long:10,minW:4,ph:'mm:ss (ex. 22:30)'},
   run10:{sport:'course',kind:'time',label:'Courir 10 km en…',dist:10,taper:1,peak:35,long:14,minW:6,ph:'mm:ss (ex. 47:00)'},
@@ -624,10 +624,14 @@ const PCT={Fondation:[.55,.6,.65],Développement:[.6,.65,.7],Spécifique:[.7,.75
    que si la séance ou la semaine précédente a été réussie.
    ========================================================================== */
 const SW_PACK=[5,10,15,20,20,25,25];
-const TPL_TYPES=[['push','Push SmartWorkout'],['pull','Pull + jambes SmartWorkout'],['pdc','Poids du corps'],['ef','Footing facile'],['long','Sortie longue'],['frac','Fractionné'],['volley','Volley']];
+const TPL_TYPES=[['bloc','Escalade (tractions + bloc)'],['push','Push SmartWorkout'],['pushj','Push + jambes SmartWorkout'],['pull','Pull + jambes SmartWorkout'],['pdc','Poids du corps'],['pdcp','Pompes et dips'],['ef','Footing facile'],['long','Sortie longue'],['frac','Fractionné'],['volley','Volley']];
 const TPL_KM={ef:6,long:10,frac:8};
-const DEFAULT_WEEK={days:[[{t:'push'},{t:'ef',km:6}],[{t:'ef',km:6},{t:'volley'}],[{t:'pull'}],[{t:'long',km:10}],[],[{t:'pdc'}],[{t:'frac',km:8}]],volMax:40};
-function weekTemplate(p){const s=p&&p.semaine;return s&&Array.isArray(s.days)&&s.days.length===7?s:DEFAULT_WEEK;}
+const DEFAULT_WEEK={days:[[{t:'bloc'},{t:'ef',km:6}],[{t:'ef',km:6},{t:'volley'}],[{t:'pushj'}],[{t:'long',km:10}],[],[{t:'bloc'},{t:'pdcp'}],[{t:'frac',km:8}]],volMax:40};
+// Ancienne semaine type (avant l'escalade, nov. 2026) : remplacée automatiquement par la nouvelle.
+const OLD_WEEK_DAYS=JSON.stringify([[{t:'push'},{t:'ef',km:6}],[{t:'ef',km:6},{t:'volley'}],[{t:'pull'}],[{t:'long',km:10}],[],[{t:'pdc'}],[{t:'frac',km:8}]]);
+function weekTemplate(p){const s=p&&p.semaine;if(!(s&&Array.isArray(s.days)&&s.days.length===7))return DEFAULT_WEEK;
+  const norm=JSON.stringify(s.days.map(l=>l.map(x=>x.km!=null?{t:x.t,km:num(x.km)}:{t:x.t})));
+  return norm===OLD_WEEK_DAYS?{days:DEFAULT_WEEK.days,volMax:s.volMax||DEFAULT_WEEK.volMax}:s;}
 function templateMode(p){return !!p&&p.mode!=='auto';}
 function bandsFor(kg){let best=null;for(let m=1;m<(1<<SW_PACK.length);m++){let s=0,c=0;const idx=[];for(let i=0;i<SW_PACK.length;i++)if(m&(1<<i)){s+=SW_PACK[i];c++;idx.push(i);}const d=Math.abs(s-kg);if(!best||d<best.d||(d===best.d&&c<best.c))best={d,c,idx,s};}return best;}
 const bandsSum=idx=>(idx||[]).reduce((a,i)=>a+SW_PACK[i],0);
@@ -732,7 +736,7 @@ function easyRange(p5){return fmtTime(p5*1.18)+'–'+fmtTime(p5*1.26)+' /km';}
 function hrTxt(p,lo,hi){const m=num(p.fcMax);return m?` (FC ${Math.round(m*lo)}–${Math.round(m*hi)})`:'';}
 
 function tplMuscu(type,date,p,logs,deload){
-  const list=type==='push'?TPL_PUSH:TPL_PULL;const blocks=[txt('Échauffement (8 min)','Mobilité des épaules, 2 séries légères du premier exercice avec l’élastique de 10 kg.')];
+  const list=type==='push'?TPL_PUSH:type==='pushj'?TPL_PUSH.concat(TPL_PULL.filter(e=>e.kind==='Jambes')):TPL_PULL;const blocks=[txt('Échauffement (8 min)','Mobilité des épaules, 2 séries légères du premier exercice avec l’élastique de 10 kg.')];
   if(deload)blocks.push(txt('Semaine allégée','Une série en moins par exercice, même résistance. Aucune série à l’échec.'));
   if(!hasSW(p))blocks.push(txt('Matériel','Coche « Pack SmartWorkout Élite » dans le questionnaire (étape 2) : cette séance est construite pour lui.'));
   let min=8;
@@ -741,15 +745,38 @@ function tplMuscu(type,date,p,logs,deload){
     min+=series*(0.75+parseRest(ex.repos)/60);
     blocks.push(exo(ex.nom,series,ex.lo,'reps',{prog:true,res:true,lo:ex.lo,hi:ex.hi,range:`${ex.lo}–${ex.hi}`,resKg:st.res,bandsIdx:combo.idx,charge:`Élastiques : ${bandsLabel(combo.idx)}`,why:st.why,app:ex.app,alt:ex.alt,repos:ex.repos,note:ex.note,cat:ex.kind}));
   }
-  return mkSession({sport:'sw',kind:'sw-'+type,title:type==='push'?'Push SmartWorkout':'Pull SmartWorkout + jambes',dureeMin:Math.round(min),intensite:deload?'Modérée':'Difficile',hard:type==='pull'?'legs':'upper',log:'sw',prog:true,blocks});
+  return mkSession({sport:'sw',kind:'sw-'+type,title:type==='push'?'Push SmartWorkout':type==='pushj'?'Push SmartWorkout + jambes':'Pull SmartWorkout + jambes',dureeMin:Math.round(min),intensite:deload?'Modérée':'Difficile',hard:type==='push'?'upper':'legs',log:'sw',prog:true,blocks});
 }
-function tplPdc(date,p,logs,deload){
+function tplPdc(date,p,logs,deload,pushOnly){
   if(deload)return mkSession({sport:'sw',kind:'sw-test',title:'Tests de force',dureeMin:45,intensite:'Test',hard:'upper',log:'test',tests:['pullups','dips','pushups'],prog:true,
     blocks:[txt('Protocole','Échauffement complet de 10 min. Un seul essai maximal par test, 4 à 5 min de repos entre deux tests, mouvements stricts. Tes résultats alimentent ta courbe de progression.'),txt(TEST_LABEL.pullups,''),txt(TEST_LABEL.dips,''),txt(TEST_LABEL.pushups,'')]});
   const blocks=[txt('Échauffement (10 min)','Mobilité épaules et poignets, 2 × 10 scapula pulls, 1 série facile de chaque mouvement.')];let min=10;
-  for(const ex of tplPdcList(p)){const st=bwState(ex,logs,date);min+=ex.series*(0.6+parseRest(ex.repos)/60);
+  for(const ex of tplPdcList(p).filter(e=>!pushOnly||!/[Tt]ractions/.test(e.nom))){const st=bwState(ex,logs,date);min+=ex.series*(0.6+parseRest(ex.repos)/60);
     blocks.push(exo(ex.nom,ex.series,st.r,'reps',{prog:true,bw:true,why:st.why,repos:ex.repos,note:ex.note,cat:ex.kind,lest:has(p,'lest')&&/Tractions strictes|Dips stricts/.test(ex.nom)&&st.r>15}));}
-  return mkSession({sport:'sw',kind:'sw-pdc',title:'Poids du corps : tractions, dips, pompes',dureeMin:Math.round(min),intensite:'Difficile',hard:'upper',log:'sw',prog:true,blocks});
+  if(pushOnly)blocks.splice(1,0,txt('Quand','Après ta séance de bloc, ou plus tard dans la journée. Pas de tractions ici : elles sont faites au début de l’escalade.'));
+  return mkSession({sport:'sw',kind:pushOnly?'sw-pdcp':'sw-pdc',title:pushOnly?'Pompes et dips':'Poids du corps : tractions, dips, pompes',dureeMin:Math.round(min),intensite:'Difficile',hard:'upper',log:'sw',prog:true,blocks});
+}
+/* --- Escalade (bloc) : 3 séries de tractions au début, puis le bloc --- */
+const BLOC_TECH_SESSIONS=16; // environ 8 semaines à 2 séances
+function blocState(logs,before){
+  const L=logs.filter(l=>l.sport==='escalade'&&l.statut!=='annulee'&&l.date<before).sort((a,b)=>a.date<b.date?-1:1);
+  const last=L[L.length-1],pain=last&&last.bloc&&last.bloc.doigts!=null?+last.bloc.doigts:null;
+  return {n:L.length,pain,lastDate:last&&last.date};
+}
+function tplBloc(date,p,logs,deload){
+  const st=blocState(logs,date),trac=Object.assign({},tplPdcList(p)[0]),bs=bwState(trac,logs,date),series=deload?2:3;
+  const blocks=[txt('Échauffement (15 min)','Mobilité des épaules, des poignets et des doigts. 5 min de traversée facile au pied du mur, puis 3 ou 4 blocs très faciles en montant progressivement.'),
+    exo(trac.nom,series,bs.r,'reps',{prog:true,bw:true,why:bs.why,repos:trac.repos,note:(trac.note?trac.note+' ':'')+'Toujours au début, jamais en fin de séance : les doigts sont épuisés après le bloc.',cat:'Tractions'})];
+  let corps,duree=75,intens='Difficile';
+  if(st.pain!=null&&st.pain>=3){intens='Modérée';duree=50;
+    corps=`Version légère : doigts ou coudes à ${st.pain}/10 à ta dernière séance (${fmtDate(parseDate(st.lastDate))}). Uniquement des blocs faciles sur grosses prises, pas de petites réglettes, pas de dévers. Arrête si la douleur augmente. Si elle atteint 5/10 ou dure deux séances de suite : pas d’escalade et avis d’un kiné.`;}
+  else if(deload){intens='Modérée';duree=45;corps='Semaine allégée : 45 min de blocs faciles, deux niveaux sous ton maximum. Aucun essai à fond.';}
+  else if(st.n<BLOC_TECH_SESSIONS){corps=`Phase technique (séance ${st.n+1} sur ${BLOC_TECH_SESSIONS}) : 60 à 75 min au maximum. Surtout des blocs un ou deux niveaux sous ton maximum : pieds précis et silencieux, bras tendus dès que possible. Au plus 3 essais sur un bloc dur, puis passe à autre chose. Repos de 2 à 3 min entre deux essais durs.`;}
+  else corps='20 min de volume sur des blocs faciles, puis 30 à 40 min à ton niveau maximum (repos de 3 min entre deux essais durs). 75 min au maximum.';
+  blocks.push(txt('Bloc',corps));
+  blocks.push(txt('Règles','Pas de planche à suspensions pour les doigts la première année. Pour t’échapper d’un bloc, désescalade plutôt que de sauter de haut.'));
+  blocks.push(txt('À saisir','Nombre de blocs tentés et réussis, niveau le plus dur réussi, douleur aux doigts et aux coudes : c’est ce qui déclenche la version légère si besoin.'));
+  return mkSession({sport:'escalade',kind:'sw-bloc',title:'Escalade : tractions + bloc',dureeMin:duree+15+Math.round(series*(0.6+parseRest(trac.repos)/60)),intensite:intens,hard:'upper',log:'sw',prog:true,blocks});
 }
 function tplRun(t,km,fit,p,deload){
   const p5=fit.p5,easy=easyRange(p5),kmMin=k=>Math.round(k*p5*1.22/60);
@@ -796,8 +823,10 @@ function buildTemplateWeeks(p,logs,A,start,nW){
     tpl.days.forEach((list,d)=>{const date=toStr(addDays(ws,d));list.forEach((s,j)=>{
       let ss=null;
       if(TPL_KM[s.t]!=null){const k=runDefs.findIndex(r=>r.d===d&&r.t===s.t&&!r.used);runDefs[k].used=true;ss=runMade[k];}
-      else if(s.t==='push'||s.t==='pull')ss=tplMuscu(s.t,date,p,logs,deload);
+      else if(s.t==='push'||s.t==='pull'||s.t==='pushj')ss=tplMuscu(s.t,date,p,logs,deload);
       else if(s.t==='pdc')ss=tplPdc(date,p,logs,deload);
+      else if(s.t==='pdcp')ss=tplPdc(date,p,logs,deload,true);
+      else if(s.t==='bloc'){if(deload&&sessions.some(x=>x.kind==='sw-bloc'))return;ss=tplBloc(date,p,logs,deload);}
       else if(s.t==='volley')ss=tplVolley(p);
       if(!ss)return;
       if(race&&toStr(race.dateObj)===date&&ss.sport==='course')return;
@@ -2235,7 +2264,7 @@ const OBJ_LABEL={perte:'Perte de poids',maintien:'Maintien',prise:'Prise de musc
    Course : environ 1 kcal par kg et par km. Autres : (MET − 1) × kg × heures. */
 function sessionKcal(s,kg){
   if(s.sport==='course'&&s.plannedKm)return s.plannedKm*kg*1.0;
-  const met=s.kind==='v-match'||s.kind==='v-event'?6:s.sport==='volley'?(s.kind==='v-club'?5:5.5):s.sport==='sw'?(s.intensite==='Test'?4:5):4;
+  const met=s.kind==='v-match'||s.kind==='v-event'?6:s.sport==='volley'?(s.kind==='v-club'?5:5.5):s.sport==='sw'?(s.intensite==='Test'?4:5):s.sport==='escalade'?5.8:4;
   return (met-1)*kg*(s.dureeMin||60)/60;
 }
 function weekTraining(kg,fallbackH){
@@ -2490,7 +2519,7 @@ function renderSuivi(){
     <div class="card stack" id="logFormCard">${logFormHtml()}</div>
     <div class="card stack">
       <div class="row between"><h3>Historique</h3>
-        <select id="logFilter" aria-label="Filtrer par sport" style="width:auto"><option value="all">Tous les sports</option>${['course','sw','volley','general'].map(k=>`<option value="${k}" ${f===k?'selected':''}>${SPORT_LABEL[k]}</option>`).join('')}</select></div>
+        <select id="logFilter" aria-label="Filtrer par sport" style="width:auto"><option value="all">Tous les sports</option>${['course','sw','escalade','volley','general'].map(k=>`<option value="${k}" ${f===k?'selected':''}>${SPORT_LABEL[k]}</option>`).join('')}</select></div>
       <div class="loglist">${shown.length?shown.map(logItemHtml).join(''):'<p class="muted">Aucune séance saisie pour l’instant.</p>'}</div>
     </div>
   </div>`;
@@ -2520,7 +2549,7 @@ function logFormHtml(){
   const s=sess.find(x=>x.id===selId)||null;
   const plan=L&&L.plan?L.plan:planSnapshot(s);
   const sport=plan?plan.sport:(L?L.sport:(S.freeSport||'course'));
-  const kind=plan?plan.log:({course:'run',sw:'sw',volley:'volley',general:'free'}[sport]);
+  const kind=plan?plan.log:({course:'run',sw:'sw',escalade:'sw',volley:'volley',general:'free'}[sport]);
   const v=(k,def='')=>L&&L[k]!=null?L[k]:def;
   let specific='';
   if(kind==='run'){
@@ -2550,6 +2579,12 @@ function logFormHtml(){
         ${(e.band||sv.band)&&bands(S.profile||{}).length?fSel('l_band_'+i,'Élastique utilisé',sv.band!=null?sv.band:(e.band||''),[['','Aucun (sans aide)'],...bands(S.profile).map(b=>[bandName(b),bandName(b)])],{hint:e.band?'Prévu : '+esc(e.band):''}):''}
       </div>`;}).join('')}
       ${exs.length?'':`<button type="button" class="btn sm" data-act="add-ex">Ajouter un exercice</button>`}
+      ${sport==='escalade'?(()=>{const bl=(L&&L.bloc)||{};return `<div class="blk stack"><b>Bloc</b><div class="fields">
+        ${fNum('l_btent','Blocs tentés',bl.tentes,{min:0,max:200,step:1})}
+        ${fNum('l_breus','Blocs réussis',bl.reussis,{min:0,max:200,step:1})}
+        ${fTxt('l_bniv','Niveau le plus dur réussi',bl.niveau||'',{ph:'Couleur ou cotation de ta salle'})}
+        ${fNum('l_bdoigts','Douleur doigts ou coudes (0 à 10)',bl.doigts,{min:0,max:10,step:1,hint:'À partir de 3, la séance suivante passe en version légère.'})}
+      </div></div>`;})():''}
       <p class="small muted">Saisis le nombre de répétitions (ou de secondes) réellement faites à chaque série. Laisse vide une série non faite.</p></div>`;
   }else if(kind==='volley'){
     const vo=(L&&L.volley)||{};
@@ -2570,7 +2605,7 @@ function logFormHtml(){
     <div class="fields">
       <div class="f"><label for="l_date">Date</label><input type="date" id="l_date" value="${esc(date)}" max="${ts}"><span class="errmsg" id="l_date_e"></span></div>
       <div class="f"><label for="l_plan">Séance du programme</label><select id="l_plan"><option value="">Séance libre (hors programme)</option>${opts}</select></div>
-      ${!plan?fSel('l_sport','Sport',sport,[['course','Course à pied'],['sw','Street workout'],['volley','Volley'],['general','Autre (mobilité, vélo…)']]):''}
+      ${!plan?fSel('l_sport','Sport',sport,[['course','Course à pied'],['sw','Street workout'],['escalade','Escalade (bloc)'],['volley','Volley'],['general','Autre (mobilité, vélo…)']]):''}
       ${!plan?fTxt('l_title','Intitulé',L?L.title:'',{ph:'Ex. Footing libre'}):''}
       ${fSel('l_statut','Statut',v('statut','realisee'),[['realisee','Réalisée comme prévu'],['partielle','Réalisée en partie'],['annulee','Annulée / non faite']])}
     </div>
@@ -2617,7 +2652,7 @@ async function submitLog(){
   const sess=allSessions().find(x=>x.id===g('l_plan'))||null;
   const plan=L&&L.plan&&L.plannedId===g('l_plan')?L.plan:planSnapshot(sess);
   const sport=plan?plan.sport:g('l_sport')||'general';
-  const kind=plan?plan.log:({course:'run',sw:'sw',volley:'volley',general:'free'}[sport]);
+  const kind=plan?plan.log:({course:'run',sw:'sw',escalade:'sw',volley:'volley',general:'free'}[sport]);
   const statut=g('l_statut');
   let bad=false;const E=(id,m)=>{setErr(id,m);bad=true;};
   const date=g('l_date');const dd=parseDate(date);
@@ -2655,7 +2690,12 @@ async function submitLog(){
       if(nom||vals.some(v=>v!=null))sets.push({nom:nom||'Exercice',unite,cible:pe?pe.cible:null,vals,lest,band,res,bands:bandsSel});
       if(!nom&&vals.some(v=>v!=null)&&!pe){setErr('l_exnom_'+i,'');document.getElementById('l_exnom_'+i).classList.add('err');bad=true;}
     });
-    if(statut==='realisee'&&!sets.some(s=>s.vals.some(v=>v!=null)))E('l_global','Saisis au moins une série réalisée, ou passe le statut en « Annulée ».');
+    if(sport==='escalade'){const bl={tentes:num(g('l_btent')),reussis:num(g('l_breus')),niveau:g('l_bniv').trim(),doigts:num(g('l_bdoigts'))};
+      chkRange('l_btent',bl.tentes,0,200,'Blocs tentés');chkRange('l_breus',bl.reussis,0,200,'Blocs réussis');chkRange('l_bdoigts',bl.doigts,0,10,'Douleur');
+      if(bl.tentes!=null&&bl.reussis!=null&&bl.reussis>bl.tentes)E('l_breus','Tu ne peux pas réussir plus de blocs que tu n’en as tentés.');
+      if(statut!=='annulee'&&bl.doigts==null)E('l_bdoigts','Indique la douleur aux doigts ou aux coudes (0 si aucune).');
+      rec.bloc=bl;}
+    if(statut==='realisee'&&!sets.some(s=>s.vals.some(v=>v!=null))&&sport!=='escalade')E('l_global','Saisis au moins une série réalisée, ou passe le statut en « Annulée ».');
     rec.sets=sets;
   }else if(kind==='volley'){
     rec.volley={type:g('l_vtype'),sauts:num(g('l_vsauts')),resultat:g('l_vres')};chkRange('l_vsauts',rec.volley.sauts,0,500,'Sauts');
@@ -2697,7 +2737,7 @@ function demoLogs(p){
       if(s.log==='run'&&s.repsN){const km=s.plannedKm;const p5=runFitness(p,logs,s.date).p5;base.rpe=7;base.run={distance:km,dureeSec:Math.round(km*p5*1.15),fcMoy:150,fcMax:178,dplus:20,fractions:'complet',reps:Array.from({length:s.repsN},()=>Math.round(p5*s.repDist*(0.975+rnd()*0.02)))};}
       else if(s.log==='run'){const km=s.plannedKm||6;const pace=prog.A.efPace*(s.intensite==='Facile'?1:0.88);base.run={distance:km,dureeSec:Math.round(km*pace),fcMoy:140+Math.round(rnd()*15),fcMax:165+Math.round(rnd()*15),dplus:Math.round(rnd()*60),fractions:s.intensite==='Facile'?'na':'complet'};
         if(s.testDist){run5-=25+rnd()*15;base.tests={run:{dist:s.testDist,sec:Math.round(s.testDist===5?run5:riegel(run5,5,s.testDist))}};}}
-      else if(s.log==='sw'){base.rpe=7;base.sets=s.blocks.filter(b=>b.t==='ex').map(b=>({nom:b.nom,unite:b.unite,cible:b.cible,res:b.resKg||null,bands:b.bandsIdx||null,vals:Array.from({length:b.series},()=>b.hi&&rnd()<0.5?b.hi:Math.max(1,b.cible-(rnd()<0.3?1:0))),lest:b.lest?7.5:null}));}
+      else if(s.log==='sw'){base.rpe=7;if(s.sport==='escalade')base.bloc={tentes:14+Math.round(rnd()*8),reussis:9+Math.round(rnd()*4),niveau:'Vert',doigts:rnd()<0.15?3:Math.round(rnd()*2)};base.sets=s.blocks.filter(b=>b.t==='ex').map(b=>({nom:b.nom,unite:b.unite,cible:b.cible,res:b.resKg||null,bands:b.bandsIdx||null,vals:Array.from({length:b.series},()=>b.hi&&rnd()<0.5?b.hi:Math.max(1,b.cible-(rnd()<0.3?1:0))),lest:b.lest?7.5:null}));}
       else if(s.log==='volley'){base.volley={type:'entrainement',sauts:60+Math.round(rnd()*40),resultat:''};}
       else if(s.log==='test'){base.tests={};for(const k of s.tests){if(k==='pullups'){pu+=1;base.tests.pullups=pu;}else if(k==='dips'){dp+=2;base.tests.dips=dp;}else if(k==='jump'){jp+=1.5;base.tests.jump=jp;}}}
     }
